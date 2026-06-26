@@ -48,11 +48,6 @@ contract is generic — anything that can call `hyprctl` can drive it.
 - `nlohmann/json` is **vendored** (`include/`), so it is *not* a system
   dependency.
 
-> [!IMPORTANT]
-> Hyprland has no stable plugin ABI. A built `fluidglass.so` only loads on the
-> exact Hyprland it was compiled against — **update Hyprland, rebuild the
-> plugin.** Installing via `hyprpm` (below) handles this automatically.
-
 ## Install
 
 ### Via hyprpm (recommended)

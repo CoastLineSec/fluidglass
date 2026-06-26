@@ -762,6 +762,7 @@ std::string statusString(eHyprCtlOutputFormat format) {
     std::lock_guard g(g_stateMutex);
     if (format == FORMAT_JSON) {
         json j = {
+            {"plugin", "fluidglass"},
             {"pluginLoaded", true},
             {"available", true},
             {"enabled", g_enabled},
