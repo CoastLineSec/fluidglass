@@ -1,0 +1,9 @@
+# Build output
+/build/
+
+# Editor / OS cruft
+*.swp
+*~
+.DS_Store
+.cache/
+compile_commands.json

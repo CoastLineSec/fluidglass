@@ -1,0 +1,22 @@
+# hyprpm manifest — https://wiki.hyprland.org/Plugins/Using-Plugins/
+#
+# Install:   hyprpm add https://github.com/CoastLineSec/fluidglass
+#            hyprpm enable fluidglass
+# Autoload:  add `exec-once = hyprpm reload` to your Hyprland config.
+#
+# hyprpm builds against the Hyprland headers matching the user's running version,
+# so it rebuilds automatically on Hyprland updates (`hyprpm update`).
+
+[repository]
+name = "fluidglass"
+authors = ["CoastLineSec"]
+
+[fluidglass]
+output = "build/fluidglass.so"
+authors = ["CoastLineSec"]
+version = "0.1.0"
+description = "Live fluid-glass compositor material for Hyprland"
+build = [
+    "cmake -B build -S . -DCMAKE_BUILD_TYPE=Release",
+    "cmake --build build --parallel",
+]
