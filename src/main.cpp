@@ -665,15 +665,28 @@ class CGlassPass : public IPassElement {
 // or isn't mapped (caller skips it). Tracks the window as it moves/changes monitor.
 bool resolveAnchor(GlassElement& el) {
     if (!g_pCompositor || el.anchorWindow.empty()) return false;
-    // Hyprland 0.55 removed CCompositor::getWindowByRegex — match the selector ourselves against the
-    // live window list (class or title); first mapped hit wins. Bad regex → no match (skip element).
+    // Hyprland 0.55 removed CCompositor::getWindowByRegex — resolve the selector ourselves against the
+    // live window list. Honour Hyprland-style "title:<re>" / "class:<re>" prefixes (bare = match either
+    // class or title); first mapped hit wins. Bad regex → no match (skip element).
+    std::string sel   = el.anchorWindow;
+    int         field = 0; // 0 = class OR title, 1 = title only, 2 = class only
+    if (sel.rfind("title:", 0) == 0) {
+        field = 1;
+        sel   = sel.substr(6);
+    } else if (sel.rfind("class:", 0) == 0) {
+        field = 2;
+        sel   = sel.substr(6);
+    }
     PHLWINDOW win;
     try {
-        const std::regex re(el.anchorWindow);
+        const std::regex re(sel);
         for (const auto& w : Desktop::windowState()->windows()) {
             if (!w || !w->m_isMapped)
                 continue;
-            if (std::regex_search(w->m_class, re) || std::regex_search(w->m_title, re)) {
+            const bool hit = (field == 1) ? std::regex_search(w->m_title, re)
+                : (field == 2)            ? std::regex_search(w->m_class, re)
+                                          : (std::regex_search(w->m_class, re) || std::regex_search(w->m_title, re));
+            if (hit) {
                 win = w;
                 break;
             }
