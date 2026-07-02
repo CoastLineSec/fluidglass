@@ -31,13 +31,17 @@
 #include <hyprland/src/state/MonitorState.hpp>
 #include <hyprland/src/managers/input/InputManager.hpp>
 #include <hyprland/src/desktop/view/Window.hpp>
+#include <hyprland/src/protocols/XDGShell.hpp>
 
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <map>
 #include <mutex>
+#include <regex>
+#include <set>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -65,6 +69,7 @@ std::string  g_lastApplyStatus = "none";
 std::string  g_lastError;
 std::string  g_lastRenderStatus = "disabled";
 uint64_t     g_generation = 0;
+double       g_animMs = 240.0;        // enter/exit animation duration (ms); shell may override per apply
 
 SP<CShader> g_shader;
 bool        g_shaderAttempted = false;
@@ -84,7 +89,7 @@ struct GlassElement {
     bool        tintEnabled = false;
     float       tintR = 1.0F, tintG = 1.0F, tintB = 1.0F;
     // Locked material (design-px at the 200px ref); overridable per element for live tuning.
-    double      refraction = 45.0, rimBand = 40.0, bevel = 46.0, rimWidth = 3.0;
+    double      refraction = 45.0, rimBand = 30.0, bevel = 30.0, rimWidth = 3.0;  // rimBand, bevel = PERCENT (0-100)
     double      highlight = 0.10, shadow = 0.10, lightDeg = 90.0, specular = 0.21, rimWrap = 0.45;
     // Mouse tracking — ONE master toggle gates the point light + distance falloff. OFF = static glass
     // (highlight/shadow at the value above). ON = point light, and highlight/shadow swing around that
@@ -98,8 +103,15 @@ struct GlassElement {
     // server-side position + offset, so the glass tracks the window. Generic: any window can host glass.
     std::string anchorWindow;                 // getWindowByRegex selector; empty = use monitor + x/y directly
     double      offsetX = 0.0, offsetY = 0.0; // glass-rect offset within the window (logical px)
+    // Enter/exit animation — universal, driven purely by elements appearing/disappearing.
+    std::chrono::steady_clock::time_point birth{};      // enter-animation start
+    std::chrono::steady_clock::time_point exitStart{};  // exit-animation start
+    bool        exiting = false;
+    double      animScale = 1.0;    // transient, per-frame: 0.9..1 grow
+    double      renderAlpha = 1.0;  // transient, per-frame: 0..1 fade
 };
 std::map<std::string, GlassElement> g_elements;
+
 std::map<std::string, std::string>  g_elementDebug;   // per-element last draw outcome (diagnostic)
 
 // Per-monitor raw backdrop capture (currentFB copy), produced each frame.
@@ -143,10 +155,12 @@ void parseHex(const std::string& hex, float& r, float& g, float& b) {
 }
 
 // ── Locked material + size-scaling (see fluid-glass-rebuild memory) ────────
-// Pixel params are RATIOS of the element's min-dimension, capped at a 200px
-// design reference, then × monitorScale. Strengths/angle are size-independent.
+// GEOMETRY pixel params (refraction/bevel/rim) are RATIOS of the element's
+// min-dimension, capped at a 200px design reference, then × monitorScale.
+// FROST (blur) + strengths/tint/angle are size-INDEPENDENT: frost is a
+// readability function, not an aesthetic, so it must not shrink on small
+// surfaces (dock/bar) — it renders the same regardless of element size.
 namespace mat {
-    constexpr double REF_PX  = 200.0;   // design reference (px); pixel params scale to this
     constexpr double BLUR_LO = 6.0;     // glass-level 0 (design px)
     constexpr double BLUR_HI = 22.0;    // glass-level 1
     constexpr double TINT_LO = 0.04;    // glass-level 0
@@ -164,17 +178,26 @@ ResolvedParams resolveParams(const GlassElement& el, double scale) {
     const double t       = clampd(el.glassLevel, 0.0, 1.0);
     const double bt      = (el.blurLevel >= 0.0) ? clampd(el.blurLevel, 0.0, 1.0) : t;  // custom or preset frost
     const double tt      = (el.tintLevel >= 0.0) ? clampd(el.tintLevel, 0.0, 1.0) : t;  // custom or preset tint
-    const double effDim  = std::min(std::min(el.w, el.h), mat::REF_PX);  // cap at the design ref
-    const double sizeFac = (effDim / mat::REF_PX) * scale;               // design px -> physical px
-    auto px = [&](double designPx) { return designPx * sizeFac; };
+    // DIRECT APPLICATION (no equation) for most effects: px value x DPI scale ONLY. Scaling is being
+    // re-introduced per-effect, one at a time, as we see what actually looks wrong. RIM BAND + BEVEL are
+    // converted so far — both PERCENTAGES of the surface (see below), not direct px values.
+    auto direct = [&](double designPx) { return designPx * scale; };
 
     ResolvedParams r;
-    r.blurPx     = px(mat::BLUR_LO + (mat::BLUR_HI - mat::BLUR_LO) * bt);
-    r.refractPx  = px(el.refraction);
-    r.rimBandPx  = px(el.rimBand);
-    r.bevelPx    = px(el.bevel);
-    r.rimWidthPx = std::max(1.0, px(el.rimWidth));
-    r.radiusPx   = el.radius * scale;
+    r.blurPx     = direct(mat::BLUR_LO + (mat::BLUR_HI - mat::BLUR_LO) * bt);
+    r.refractPx  = direct(el.refraction);
+    // RIM BAND + BEVEL — PERCENTAGES of the surface, not px. Each band runs in from opposing edges; the
+    // two meet across the narrow axis at 100%, so thickness = (pct/100) * min(W,H)/2. ONE scalar per band
+    // applied to all four sides (shader bands by distance-to-nearest-edge) -> uniform frame, never thicker
+    // on one side. min(W,H) references the short axis so it saturates sensibly on a tall ribbon. A
+    // fraction of the surface's OWN physical px -> size- AND DPI-correct for free (the dimension already
+    // carries scale — no extra *scale on top).
+    const double edgeRef = std::min(el.w, el.h) * scale;             // narrow axis, physical px = min(dw,dh)
+    auto pctBand = [&](double pct) { return (clampd(pct, 0.0, 100.0) / 100.0) * edgeRef * 0.5; };
+    r.rimBandPx  = pctBand(el.rimBand);
+    r.bevelPx    = pctBand(el.bevel);
+    r.rimWidthPx = std::max(1.0, direct(el.rimWidth));
+    r.radiusPx   = direct(el.radius);
     r.highlight  = el.highlight;
     r.shadow     = el.shadow;
     r.specular   = el.specular;
@@ -455,14 +478,25 @@ void drawElement(const GlassElement& el, const SP<Render::ITexture>& capture) {
     const double ch    = capture->m_size.y;
     if (cw <= 0 || ch <= 0 || el.w <= 0 || el.h <= 0) return;
 
+    // Enter/exit animation: shrink around the centre by animScale (radius + material
+    // scale with it, so the whole glass grows/shrinks coherently); fade via uAlpha.
+    const double as = clampd(el.animScale, 0.0, 1.0);
+    const double ew = el.w * as, eh = el.h * as;
+    const double ex = el.x + (el.w - ew) * 0.5;
+    const double ey = el.y + (el.h - eh) * 0.5;
+
     // Element rect in display-space physical px (monitor-local).
-    const double dx = el.x * scale, dy = el.y * scale;
-    const double dw = el.w * scale, dh = el.h * scale;
+    const double dx = ex * scale, dy = ey * scale;
+    const double dw = ew * scale, dh = eh * scale;
 
     // Source-texture UV of the 4 corners (transform-mapped for rotated displays).
+    // NOT clamped to [0,1]: when the window is taller/wider than the monitor, the off-screen
+    // corners must keep their true (out-of-range) UV so the VISIBLE part still maps 1:1. Clamping
+    // here squashes the whole backdrop into the visible area -> the height-linked vertical stretch.
+    // CLAMP_TO_EDGE on the texture covers any sample that lands outside the captured frame.
     auto cornerUv = [&](double px, double py) -> Pt {
         Pt phys = (tf == 0) ? Pt{px, py} : inverseTransformPoint({px, py}, tf, cw, ch);
-        return {clampd(phys.x / cw, 0.0, 1.0), clampd(phys.y / ch, 0.0, 1.0)};
+        return {phys.x / cw, phys.y / ch};
     };
     const Pt uvTL = cornerUv(dx, dy);
     const Pt uvTR = cornerUv(dx + dw, dy);
@@ -472,7 +506,7 @@ void drawElement(const GlassElement& el, const SP<Render::ITexture>& capture) {
     CBox box(dx, dy, dw, dh);
     CRegion overlap{g_pHyprRenderer->m_renderData.damage};
     overlap.intersect(box.x, box.y, box.width, box.height);
-    if (overlap.empty()) return;          // backdrop under the glass didn't change
+    if (overlap.empty()) return;      // backdrop under the glass didn't change -> keep last frame
     CRegion boxRegion{box};
 
     CBox projected = box;
@@ -495,7 +529,9 @@ void drawElement(const GlassElement& el, const SP<Render::ITexture>& capture) {
     capture->setTexParameter(GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     capture->setTexParameter(GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 
-    const ResolvedParams rp = resolveParams(el, scale);
+    GlassElement es = el;
+    es.w = ew; es.h = eh; es.radius = el.radius * as;
+    const ResolvedParams rp = resolveParams(es, scale);
 
     // Light direction: fixed angle, or — the "gyroscope" — following the cursor, so the
     // specular highlight sweeps around the glass as the mouse moves (Apple's tilt trick).
@@ -557,7 +593,7 @@ void drawElement(const GlassElement& el, const SP<Render::ITexture>& capture) {
     u1("uRimWidthPx", static_cast<float>(rp.rimWidthPx));
     u1("uRimWrap", static_cast<float>(rp.rimWrap));
     u4("uTint", rp.tintR, rp.tintG, rp.tintB, static_cast<float>(rp.tintStrength));
-    u1("uAlpha", 1.0F);
+    u1("uAlpha", static_cast<float>(clampd(el.renderAlpha, 0.0, 1.0)));
 
     glBindVertexArray(shader->getUniformLocation(SHADER_SHADER_VAO));
     glBindBuffer(GL_ARRAY_BUFFER, shader->getUniformLocation(SHADER_SHADER_VBO));
@@ -591,6 +627,11 @@ class CCapturePass : public IPassElement {
     ePassElementType type() override { return EK_CUSTOM; }
     std::optional<CBox> boundingBox() override { return std::nullopt; }
     CRegion opaqueRegion() override { return {}; }
+    // Must NOT be occlusion-culled: simplify() walks passes in reverse and discards
+    // boundingbox-less elements once damage is consumed. The app-glass backdrop capture is
+    // first in the list (reached last), so without this it gets dropped when opaque windows
+    // cover the screen — leaving g_capture as the full frame and breaking the consistent backdrop.
+    bool undiscardable() override { return true; }
     std::vector<UP<IPassElement>> draw() override {
         g_capture = captureBackdropForCurrentMonitor();
         return {};
@@ -623,8 +664,23 @@ class CGlassPass : public IPassElement {
 // the target window's server-side geometry. Returns false if the window isn't found
 // or isn't mapped (caller skips it). Tracks the window as it moves/changes monitor.
 bool resolveAnchor(GlassElement& el) {
-    if (!g_pCompositor) return false;
-    PHLWINDOW win = g_pCompositor->getWindowByRegex(el.anchorWindow);
+    if (!g_pCompositor || el.anchorWindow.empty()) return false;
+    // Hyprland 0.55 removed CCompositor::getWindowByRegex — match the selector ourselves against the
+    // live window list (class or title); first mapped hit wins. Bad regex → no match (skip element).
+    PHLWINDOW win;
+    try {
+        const std::regex re(el.anchorWindow);
+        for (const auto& w : Desktop::windowState()->windows()) {
+            if (!w || !w->m_isMapped)
+                continue;
+            if (std::regex_search(w->m_class, re) || std::regex_search(w->m_title, re)) {
+                win = w;
+                break;
+            }
+        }
+    } catch (const std::exception&) {
+        return false;
+    }
     if (!win || !win->m_isMapped) return false;
     const auto mon = win->m_monitor.lock();
     if (!mon) return false;
@@ -640,19 +696,53 @@ void renderFluidGlass(eRenderStage stage) {
     if (!g_pHyprRenderer) return;
 
     std::vector<GlassElement> here;
+    std::vector<CBox>          finishedBoxes;
     {
         std::lock_guard guard(g_stateMutex);
         if (!g_enabled || g_elements.empty()) return;
         const auto monitor = g_pHyprRenderer->renderData().pMonitor.lock();
         if (!monitor) return;
-        for (const auto& [id, el0] : g_elements) {
+
+        const auto   now    = std::chrono::steady_clock::now();
+        const double durSec = std::max(1.0, g_animMs) / 1000.0;
+        auto elapsed = [&](std::chrono::steady_clock::time_point t) {
+            return std::chrono::duration<double>(now - t).count();
+        };
+        // smootherstep — gentle at both ends, reads like settling glass.
+        auto ease = [](double t) {
+            t = clampd(t, 0.0, 1.0);
+            return t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
+        };
+
+        std::vector<std::string> finished;
+        for (auto& [id, el0] : g_elements) {
+            double shownT;
+            if (el0.exiting) {
+                const double t = elapsed(el0.exitStart) / durSec;
+                if (t >= 1.0) {
+                    finished.push_back(id);
+                    finishedBoxes.push_back(CBox(monitor->m_position.x + el0.x, monitor->m_position.y + el0.y, el0.w, el0.h));
+                    continue;
+                }
+                shownT = ease(1.0 - t);
+            } else {
+                shownT = ease(elapsed(el0.birth) / durSec);
+            }
+
             GlassElement el = el0;
             if (!el.anchorWindow.empty() && !resolveAnchor(el))
                 continue;
-            if (el.monitor == monitor->m_name && el.w > 0 && el.h > 0)
+            if (el.monitor == monitor->m_name && el.w > 0 && el.h > 0) {
+                el.animScale   = 0.9 + 0.1 * shownT;
+                el.renderAlpha = shownT;
                 here.push_back(el);
+            }
         }
+        for (const auto& id : finished)
+            g_elements.erase(id);
     }
+    for (const auto& b : finishedBoxes)
+        if (g_pHyprRenderer) g_pHyprRenderer->damageBox(b);
     if (here.empty()) return;
 
     const auto mon = g_pHyprRenderer->renderData().pMonitor.lock();
@@ -733,10 +823,33 @@ std::string applyPayload(std::string payload) {
         }
     }
     const bool enabled = jbool(doc, "enabled", true);
+    const double animMs = jnum(doc, "animMs", -1.0);
 
     {
         std::lock_guard g(g_stateMutex);
-        g_elements = std::move(parsed);
+        const auto now = std::chrono::steady_clock::now();
+        if (animMs >= 0.0) g_animMs = animMs;
+        // Merge (not replace) so enter/exit animations survive re-applies: new ids
+        // animate in; ids that vanished animate out (kept until the exit completes);
+        // existing ids keep their animation state but take the new geometry/material.
+        for (auto& [id, pe] : parsed) {
+            auto it = g_elements.find(id);
+            if (it == g_elements.end()) {
+                pe.birth   = now;
+                pe.exiting = false;
+                g_elements.emplace(id, pe);
+            } else {
+                pe.birth   = it->second.exiting ? now : it->second.birth;  // re-entering restarts the clock
+                pe.exiting = false;
+                it->second = pe;
+            }
+        }
+        for (auto& [id, el] : g_elements) {
+            if (!el.exiting && parsed.find(id) == parsed.end()) {
+                el.exiting   = true;
+                el.exitStart = now;
+            }
+        }
         g_enabled  = enabled;
         g_lastApplyStatus = "accepted";
         g_lastError.clear();
