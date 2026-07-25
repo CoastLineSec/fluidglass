@@ -1,6 +1,6 @@
 <div align="center">
 
-# fluidglass
+# HyprFluidGlass
 
 **Live fluid-glass compositor material for Hyprland.**
 
@@ -14,7 +14,7 @@ convex bevel, a specular rim, and an optional cursor-tracked point light.
 
 ## What it is
 
-`fluidglass` is the rendering half of a glass UI. It does **not** decide *what*
+`hyprfluidglass` is the rendering half of a glass UI. It does **not** decide *what*
 should be glass — a client (a shell, a bar, a widget) sends it element geometry
 over `hyprctl`, and the plugin captures the real pixels behind each element at
 `RENDER_POST_WINDOWS` and runs the fluid-glass shader over them. Because the
@@ -57,8 +57,8 @@ official plugin manager. It builds the plugin against your exact Hyprland and
 rebuilds it on Hyprland updates.
 
 ```sh
-hyprpm add https://github.com/CoastLineSec/fluidglass
-hyprpm enable fluidglass
+hyprpm add https://github.com/CoastLineSec/HyprFluidGlass
+hyprpm enable hyprfluidglass
 ```
 
 Then add to your Hyprland config so it loads (and re-syncs after updates) on
@@ -73,10 +73,10 @@ After a Hyprland upgrade: `hyprpm update` (rebuilds), then `hyprpm reload`.
 ### Manual build
 
 ```sh
-git clone https://github.com/CoastLineSec/fluidglass
-cd fluidglass
-make                      # → build/fluidglass.so
-hyprctl plugin load "$PWD/build/fluidglass.so"
+git clone https://github.com/CoastLineSec/HyprFluidGlass
+cd HyprFluidGlass
+make                      # → build/hyprfluidglass.so
+hyprctl plugin load "$PWD/build/hyprfluidglass.so"
 ```
 
 `make dev-artifact` produces a uniquely-named copy (timestamp + commit) — useful
@@ -89,15 +89,15 @@ sends it elements and enables it.
 
 | Dispatcher | Purpose |
 |---|---|
-| `fluidglass-apply-json <json>` | Replace the element set + global enable state. |
-| `fluidglass-status` | Plugin/render status. Use `hyprctl -j fluidglass-status` for JSON. |
-| `fluidglass-clear` | Remove all elements. |
-| `fluidglass-material <on\|off\|status>` | Global enable/disable, or status. |
+| `hyprfluidglass-apply-json <json>` | Replace the element set + global enable state. |
+| `hyprfluidglass-status` | Plugin/render status. Use `hyprctl -j hyprfluidglass-status` for JSON. |
+| `hyprfluidglass-clear` | Remove all elements. |
+| `hyprfluidglass-material <on\|off\|status>` | Global enable/disable, or status. |
 
 ### Apply payload
 
 ```sh
-hyprctl fluidglass-apply-json '{
+hyprctl hyprfluidglass-apply-json '{
   "enabled": true,
   "elements": [
     { "id": "bar", "monitor": "DP-1",
@@ -166,7 +166,7 @@ flipped outputs render correctly.
 
 ## Versioning
 
-`fluidglass` follows the Hyprland plugin model: it is pinned to a Hyprland ABI
+`hyprfluidglass` follows the Hyprland plugin model: it is pinned to a Hyprland ABI
 and must be rebuilt when Hyprland updates — `hyprpm` automates this. The plugin
 reports its version to Hyprland (shown in `hyprctl plugins list`); build time and
 source commit are compiled in for diagnostics.

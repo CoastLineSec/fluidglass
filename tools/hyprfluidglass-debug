@@ -1,0 +1,194 @@
+#!/usr/bin/env python3
+"""hyprfluidglass-debug — live diagnostics for the hyprfluidglass Hyprland plugin.
+
+Reads the plugin's `hyprfluidglass-debug-json` hyprctl command: verbose per-element
+state (what each glass surface binds to, where it draws, on which monitor, its
+animation/bind lifecycle and draw statistics) plus a bounded ring of lifecycle
+events (apply/bind/draw/exit/purge/shader transitions).
+
+Modes:
+  hyprfluidglass-debug                 live watch: state table + streaming events
+  hyprfluidglass-debug --once          print the table once and exit
+  hyprfluidglass-debug --json          raw debug JSON (one shot)
+  hyprfluidglass-debug --report [SEC]  capture a shareable bug-report bundle to
+                                   stdout (env info + snapshots + events over
+                                   SEC seconds, default 8) — attach to issues
+
+Python 3 stdlib only; requires a running Hyprland session with the plugin loaded.
+"""
+
+import argparse
+import json
+import shutil
+import subprocess
+import sys
+import time
+
+
+def hyprctl(*args, parse_json=True):
+    try:
+        out = subprocess.run(["hyprctl", *args], capture_output=True, text=True, timeout=5).stdout
+    except FileNotFoundError:
+        sys.exit("hyprctl not found — is this a Hyprland session?")
+    except subprocess.TimeoutExpired:
+        sys.exit("hyprctl timed out")
+    if not parse_json:
+        return out
+    try:
+        return json.loads(out)
+    except json.JSONDecodeError:
+        return None
+
+
+def fetch():
+    data = hyprctl("hyprfluidglass-debug-json")
+    if data is None:
+        sys.exit("hyprfluidglass plugin not loaded (hyprfluidglass-debug-json returned no JSON)")
+    return data
+
+
+def fmt_rect(r):
+    if not r:
+        return "-"
+    return f"{r[0]:.0f},{r[1]:.0f} {r[2]:.0f}x{r[3]:.0f}" if len(r) == 4 else f"{r[0]:.0f},{r[1]:.0f}"
+
+
+def element_rows(state):
+    rows = []
+    for el in state.get("elements", []):
+        bind = el.get("bind")
+        if bind:
+            b = f"{bind['type']}:{bind['selector']}"
+            b += " [OK]" if bind.get("bound") else " [LOST]"
+        else:
+            b = "raw-geometry"
+        if el.get("exiting"):
+            st = "exiting"
+        elif bind and not bind.get("bound"):
+            st = "unbound"
+        elif el.get("onScreen"):
+            st = "on-screen"
+        else:
+            st = "idle"
+        rows.append({
+            "id": el["id"],
+            "mon": el.get("monitor", "?"),
+            "bind": b,
+            "payload": fmt_rect(el.get("payloadRect")),
+            "drawn": fmt_rect(el.get("drawnAt")),
+            "state": st,
+            "draws": str(el.get("drawCount", 0)),
+            "cause": el.get("lastDrawCause") or "-",
+        })
+    return rows
+
+
+def print_table(data, term_width):
+    state = data["state"]
+    head = (f"enabled={state['enabled']}  render={state['lastRenderStatus']}  "
+            f"shader={state['shaderCompiled']}/{'blur-ok' if state['blurShaderCompiled'] else 'BLUR-FAIL'}  "
+            f"gen={state['generation']}  animMs={state['animMs']:.0f}")
+    if state.get("shaderError"):
+        head += f"  shaderError={state['shaderError']}"
+    print(head)
+    if state.get("lastError"):
+        print(f"lastError: {state['lastError']}")
+
+    rows = element_rows(state)
+    if not rows:
+        print("  (no elements)")
+        return
+    cols = [("ID", "id"), ("MON", "mon"), ("BIND", "bind"), ("PAYLOAD", "payload"),
+            ("DRAWN-AT (global)", "drawn"), ("STATE", "state"), ("DRAWS", "draws"), ("CAUSE", "cause")]
+    widths = {k: max(len(t), max(len(r[k]) for r in rows)) for t, k in cols}
+    line = "  ".join(t.ljust(widths[k]) for t, k in cols)
+    print(line[:term_width])
+    print("-" * min(len(line), term_width))
+    for r in rows:
+        print(("  ".join(r[k].ljust(widths[k]) for _, k in cols))[:term_width])
+
+
+def print_events(events, since_seq, term_width):
+    new = [e for e in events if e["seq"] > since_seq]
+    for e in new:
+        ident = e["id"] or "*"
+        print(f"[{e['tMs']/1000.0:10.3f}s] {ident}: {e['event']}  {e['info']}"[:term_width])
+    return max((e["seq"] for e in events), default=since_seq)
+
+
+def mode_live(interval, once=False):
+    last_seq = 0
+    first = True
+    while True:
+        data = fetch()
+        width = shutil.get_terminal_size((120, 40)).columns
+        if once:
+            print_table(data, width)
+            print()
+            print("--- events (full ring) ---")
+            print_events(data["events"], 0, width)
+            return
+        if first:
+            # start tailing from "now": show state, skip the historical ring
+            last_seq = max((e["seq"] for e in data["events"]), default=0)
+            first = False
+        print("\x1b[2J\x1b[H", end="")  # clear screen, home
+        print(time.strftime("%H:%M:%S"), "— hyprfluidglass-debug (Ctrl-C to quit)")
+        print_table(data, width)
+        print()
+        print("--- events ---")
+        # live mode reprints the tail of the ring so recent history stays visible
+        tail = data["events"][-15:]
+        for e in tail:
+            marker = "*" if e["seq"] > last_seq else " "
+            ident = e["id"] or "*"
+            print(f"{marker}[{e['tMs']/1000.0:10.3f}s] {ident}: {e['event']}  {e['info']}"[:width])
+        last_seq = max((e["seq"] for e in data["events"]), default=last_seq)
+        time.sleep(interval)
+
+
+def mode_report(seconds):
+    bundle = {
+        "tool": "hyprfluidglass-debug",
+        "capturedAt": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "hyprlandVersion": hyprctl("version", "-j"),
+        "monitors": hyprctl("monitors", "-j"),
+        "snapshots": [],
+    }
+    t0 = time.time()
+    bundle["snapshots"].append(fetch())
+    while time.time() - t0 < seconds:
+        time.sleep(min(2.0, max(0.1, seconds - (time.time() - t0))))
+        bundle["snapshots"].append(fetch())
+    # the last snapshot's ring is the authoritative event history
+    bundle["events"] = bundle["snapshots"][-1]["events"]
+    for s in bundle["snapshots"]:
+        s.pop("events", None)
+    json.dump(bundle, sys.stdout, indent=2)
+    print()
+
+
+def main():
+    ap = argparse.ArgumentParser(description="hyprfluidglass plugin diagnostics")
+    ap.add_argument("--once", action="store_true", help="print state + full event ring once")
+    ap.add_argument("--json", action="store_true", help="dump raw debug JSON once")
+    ap.add_argument("--report", nargs="?", const=8.0, type=float, metavar="SEC",
+                    help="capture a bug-report bundle over SEC seconds (default 8) to stdout")
+    ap.add_argument("--interval", type=float, default=0.25, help="live refresh interval (default 0.25s)")
+    args = ap.parse_args()
+
+    if args.json:
+        print(json.dumps(fetch(), indent=2))
+    elif args.report is not None:
+        mode_report(args.report)
+    elif args.once:
+        mode_live(args.interval, once=True)
+    else:
+        try:
+            mode_live(args.interval)
+        except KeyboardInterrupt:
+            pass
+
+
+if __name__ == "__main__":
+    main()
