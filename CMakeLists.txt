@@ -80,6 +80,7 @@ add_library(hyprfluidglass-v2-core STATIC
     src/v2/targets/LayerAdapter.cpp
     src/v2/targets/LayerRuleResolver.cpp
     src/v2/targets/RegionAdapter.cpp
+    src/v2/targets/TargetResolver.cpp
     src/v2/targets/WindowAttachmentPlan.cpp
     src/v2/targets/WindowAdapter.cpp
     src/v2/targets/WindowRuleResolver.cpp
@@ -235,6 +236,12 @@ if(BUILD_TESTING)
     target_link_libraries(hyprfluidglass-window-rule-resolver-tests PRIVATE hyprfluidglass-v2-core)
     target_compile_options(hyprfluidglass-window-rule-resolver-tests PRIVATE -Wall -Wextra -Wpedantic)
     add_test(NAME hyprfluidglass-window-rule-resolver COMMAND hyprfluidglass-window-rule-resolver-tests)
+
+    add_executable(hyprfluidglass-target-resolver-tests tests/target_resolver_tests.cpp)
+    target_include_directories(hyprfluidglass-target-resolver-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+    target_link_libraries(hyprfluidglass-target-resolver-tests PRIVATE hyprfluidglass-v2-core)
+    target_compile_options(hyprfluidglass-target-resolver-tests PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME hyprfluidglass-target-resolver COMMAND hyprfluidglass-target-resolver-tests)
 
     add_executable(hyprfluidglass-protocol-tests tests/protocol_tests.cpp)
     target_include_directories(hyprfluidglass-protocol-tests PRIVATE
