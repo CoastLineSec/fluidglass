@@ -16,6 +16,8 @@ class HyprlandWindowCatalog {
   public:
     [[nodiscard]] Result<std::vector<WindowSnapshot>> snapshots(
         std::string_view address);
+    [[nodiscard]] Result<PHLWINDOW> windowFor(
+        std::uint64_t objectToken);
 
     void clear() noexcept;
 

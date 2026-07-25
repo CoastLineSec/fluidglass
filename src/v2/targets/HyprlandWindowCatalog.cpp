@@ -117,6 +117,32 @@ HyprlandWindowCatalog::snapshots(std::string_view address) {
         std::move(result));
 }
 
+Result<PHLWINDOW> HyprlandWindowCatalog::windowFor(
+    std::uint64_t objectToken) {
+    if (objectToken == 0U)
+        return Result<PHLWINDOW>::failure({
+            .code = ErrorCode::InvalidRequest,
+            .path = "object_token",
+            .message = "window object token must not be zero",
+        });
+
+    std::erase_if(m_tokens, [](const auto& entry) {
+        return entry.first.expired();
+    });
+    for (const auto& [reference, token] : m_tokens) {
+        if (token != objectToken)
+            continue;
+        const auto window = reference.lock();
+        if (window)
+            return Result<PHLWINDOW>::success(window);
+    }
+    return Result<PHLWINDOW>::failure({
+        .code = ErrorCode::UnresolvedTarget,
+        .path = "object_token",
+        .message = "window object token is no longer live",
+    });
+}
+
 void HyprlandWindowCatalog::clear() noexcept {
     m_tokens.clear();
 }
