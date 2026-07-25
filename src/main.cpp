@@ -54,6 +54,7 @@
 #include <cctype>
 #include <cstdint>
 #include <deque>
+#include <exception>
 #include <format>
 #include <map>
 #include <mutex>
@@ -187,6 +188,31 @@ void dbgLog(const std::string& id, const std::string& event, const std::string& 
     g_dbgEvents.push_back({++g_dbgSeq, t, id, event, info});
     if (g_dbgEvents.size() > 1024)
         g_dbgEvents.pop_front();
+}
+
+void recordBoundaryFailure(std::string_view boundary, const char* detail) noexcept {
+    try {
+        std::lock_guard guard(g_stateMutex);
+        g_lastError        = std::string(boundary) + " callback failed";
+        g_lastRenderStatus = "error";
+    } catch (...) {
+    }
+    try {
+        dbgLog("", "callback.error", std::string(boundary) + ": " + (detail ? detail : "unknown exception"));
+    } catch (...) {
+    }
+}
+
+template <typename F>
+std::string runCommandBoundary(std::string_view boundary, F&& command) {
+    try {
+        return std::forward<F>(command)();
+    } catch (const std::exception& error) {
+        recordBoundaryFailure(boundary, error.what());
+    } catch (...) {
+        recordBoundaryFailure(boundary, "non-standard exception");
+    }
+    return "error: internal plugin failure\n";
 }
 
 // One glass surface requested by the client.
@@ -1704,7 +1730,18 @@ class CCapturePass : public IPassElement {
     // cover the screen — leaving the holder empty and skipping the glass that frame.
     bool undiscardable() override { return true; }
     std::vector<UP<IPassElement>> draw() override {
-        if (m_holder) m_holder->tex = captureBackdropForCurrentMonitor(m_stageKey);
+        try {
+            if (m_holder)
+                m_holder->tex = captureBackdropForCurrentMonitor(m_stageKey);
+        } catch (const std::exception& error) {
+            if (m_holder)
+                m_holder->tex.reset();
+            recordBoundaryFailure("capture-pass", error.what());
+        } catch (...) {
+            if (m_holder)
+                m_holder->tex.reset();
+            recordBoundaryFailure("capture-pass", "non-standard exception");
+        }
         return {};
     }
   private:
@@ -1734,32 +1771,38 @@ class CGlassPass : public IPassElement {
     }
     CRegion opaqueRegion() override { return {}; }
     std::vector<UP<IPassElement>> draw() override {
-        if (!drawElement(m_el, m_holder ? m_holder->tex : nullptr))
-            return {};
+        try {
+            if (!drawElement(m_el, m_holder ? m_holder->tex : nullptr))
+                return {};
 
-        const auto monitor = g_pHyprRenderer ? g_pHyprRenderer->renderData().pMonitor.lock() : nullptr;
-        if (!monitor)
-            return {};
+            const auto monitor = g_pHyprRenderer ? g_pHyprRenderer->renderData().pMonitor.lock() : nullptr;
+            if (!monitor)
+                return {};
 
-        std::lock_guard guard(g_stateMutex);
-        const auto      it = g_elements.find(m_el.id);
-        if (it == g_elements.end() || it->second.rev != m_el.rev)
-            return {};
+            std::lock_guard guard(g_stateMutex);
+            const auto      it = g_elements.find(m_el.id);
+            if (it == g_elements.end() || it->second.rev != m_el.rev)
+                return {};
 
-        auto& live = it->second;
-        if (!live.wasDrawn)
-            dbgLog(m_el.id, "draw.start", m_el.lastDrawCause + " on " + monitor->m_name);
-        if (live.drawnRev != live.rev || live.drawnEpoch != g_drawEpoch)
-            g_glassDirty = true;
-        live.wasDrawn      = true;
-        live.drawnRev      = live.rev;
-        live.drawnEpoch    = g_drawEpoch;
-        live.lastGX        = monitor->m_position.x + m_el.x;
-        live.lastGY        = monitor->m_position.y + m_el.y;
-        live.lastGW        = m_el.w;
-        live.lastGH        = m_el.h;
-        live.lastDrawCause = m_el.lastDrawCause;
-        ++live.drawCount;
+            auto& live = it->second;
+            if (!live.wasDrawn)
+                dbgLog(m_el.id, "draw.start", m_el.lastDrawCause + " on " + monitor->m_name);
+            if (live.drawnRev != live.rev || live.drawnEpoch != g_drawEpoch)
+                g_glassDirty = true;
+            live.wasDrawn      = true;
+            live.drawnRev      = live.rev;
+            live.drawnEpoch    = g_drawEpoch;
+            live.lastGX        = monitor->m_position.x + m_el.x;
+            live.lastGY        = monitor->m_position.y + m_el.y;
+            live.lastGW        = m_el.w;
+            live.lastGH        = m_el.h;
+            live.lastDrawCause = m_el.lastDrawCause;
+            ++live.drawCount;
+        } catch (const std::exception& error) {
+            recordBoundaryFailure("glass-pass", error.what());
+        } catch (...) {
+            recordBoundaryFailure("glass-pass", "non-standard exception");
+        }
         return {};
     }
   private:
@@ -1930,7 +1973,7 @@ bool resolveLayerBind(GlassElement& el, const PHLMONITOR& monitor, double& alpha
 // each frame at POST_WALLPAPER, which precedes the window loop.
 static std::unordered_set<std::string> g_preWindowDrawn;
 
-void renderFluidGlass(eRenderStage stage) {
+void renderFluidGlassImpl(eRenderStage stage) {
     if (stage != RENDER_POST_WINDOWS && stage != RENDER_POST_WALLPAPER && stage != RENDER_PRE_WINDOW) return;
     if (!g_pHyprRenderer) return;
     // Two draw stages: elements bound to BACKGROUND/BOTTOM layer surfaces (e.g.
@@ -2461,6 +2504,16 @@ void renderFluidGlass(eRenderStage stage) {
     for (auto& el : here)
         g_pHyprRenderer->m_renderPass.add(makeUnique<CGlassPass>(el, captureHolder));
     g_lastRenderStatus = "ok";
+}
+
+void renderFluidGlass(eRenderStage stage) {
+    try {
+        renderFluidGlassImpl(stage);
+    } catch (const std::exception& error) {
+        recordBoundaryFailure("render-stage", error.what());
+    } catch (...) {
+        recordBoundaryFailure("render-stage", "non-standard exception");
+    }
 }
 
 void damageAllMonitors() {
@@ -3276,22 +3329,42 @@ static std::chrono::milliseconds glassNextInterval() {
                                                  : std::chrono::milliseconds(1000);
 }
 
-std::string onStatus(eHyprCtlOutputFormat format, std::string) { return statusString(format); }
-std::string onApply(eHyprCtlOutputFormat, std::string req) { return applyPayload(removePrefix(std::move(req), "hyprfluidglass-apply-json")); }
-std::string onClear(eHyprCtlOutputFormat, std::string) { return clearElements(); }
-std::string onDebugJson(eHyprCtlOutputFormat, std::string) { return debugJson(false); }
-std::string onDebugJsonVerbose(eHyprCtlOutputFormat, std::string) { return debugJson(true); }
+std::string onStatus(eHyprCtlOutputFormat format, std::string) {
+    return runCommandBoundary("status", [format] {
+        return statusString(format);
+    });
+}
+std::string onApply(eHyprCtlOutputFormat, std::string req) {
+    return runCommandBoundary("apply", [request = std::move(req)]() mutable {
+        return applyPayload(removePrefix(std::move(request), "hyprfluidglass-apply-json"));
+    });
+}
+std::string onClear(eHyprCtlOutputFormat, std::string) {
+    return runCommandBoundary("clear", clearElements);
+}
+std::string onDebugJson(eHyprCtlOutputFormat, std::string) {
+    return runCommandBoundary("debug-json", [] {
+        return debugJson(false);
+    });
+}
+std::string onDebugJsonVerbose(eHyprCtlOutputFormat, std::string) {
+    return runCommandBoundary("debug-json-verbose", [] {
+        return debugJson(true);
+    });
+}
 
 // Dispatcher twin of hyprfluidglass-apply-json: reachable over the Hyprland socket's
 // `dispatch` request, which clients can send WITHOUT spawning hyprctl (quickshell's
 // Hyprland.dispatch). That drops per-update transport cost from a fork+exec to a
 // socket write — the difference between ~20 geometry updates/s and full-rate.
 SDispatchResult onApplyDispatch(std::string arg) {
-    const std::string res = applyPayload(std::move(arg));
+    const std::string res = runCommandBoundary("apply-dispatch", [request = std::move(arg)]() mutable {
+        return applyPayload(std::move(request));
+    });
     const bool        ok  = res.rfind("ok", 0) == 0;
     return SDispatchResult{.success = ok, .error = ok ? "" : res};
 }
-std::string onMaterial(eHyprCtlOutputFormat format, std::string req) {
+std::string onMaterialImpl(eHyprCtlOutputFormat format, std::string req) {
     const std::string m = lower(removePrefix(std::move(req), "hyprfluidglass-material"));
     if (m.empty() || m == "status") return statusString(format);
     if (m.rfind("debug:", 0) == 0) {
@@ -3302,6 +3375,11 @@ std::string onMaterial(eHyprCtlOutputFormat format, std::string req) {
     if (m == "off" || m == "disable" || m == "disabled" || m == "false" || m == "0") return setEnabled(false);
     if (m == "fluid-glass" || m == "on" || m == "enable" || m == "enabled" || m == "true" || m == "1") return setEnabled(true);
     return "error: expected on/off/fluid-glass or status\n";
+}
+std::string onMaterial(eHyprCtlOutputFormat format, std::string req) {
+    return runCommandBoundary("material", [format, request = std::move(req)]() mutable {
+        return onMaterialImpl(format, std::move(request));
+    });
 }
 
 } // namespace
@@ -3337,9 +3415,19 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         // P4: hgsglass readiness/health timer — coalesced change events + ~1s
         // heartbeat while descriptors are active; self-re-arms at a variable cadence.
         g_glassTimer = makeShared<CEventLoopTimer>(std::chrono::milliseconds(200), [](SP<CEventLoopTimer> self, void*) {
-            glassScan();
-            if (self)
-                self->updateTimeout(glassNextInterval());
+            try {
+                glassScan();
+                if (self)
+                    self->updateTimeout(glassNextInterval());
+            } catch (const std::exception& error) {
+                recordBoundaryFailure("readiness-timer", error.what());
+                if (self)
+                    self->updateTimeout(std::chrono::seconds(1));
+            } catch (...) {
+                recordBoundaryFailure("readiness-timer", "non-standard exception");
+                if (self)
+                    self->updateTimeout(std::chrono::seconds(1));
+            }
         }, nullptr);
         g_pEventLoopManager->addTimer(g_glassTimer);
     }
