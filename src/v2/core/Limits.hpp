@@ -7,6 +7,7 @@ namespace hfg::v2 {
 
 struct Limits {
     static constexpr std::size_t MAX_REQUEST_BYTES        = 256U * 1024U;
+    static constexpr std::size_t MAX_JSON_NESTING         = 64U;
     static constexpr std::size_t MAX_IDENTIFIER_BYTES     = 128U;
     static constexpr std::size_t MAX_REGEX_BYTES          = 256U;
     static constexpr std::size_t MAX_SESSIONS             = 64U;

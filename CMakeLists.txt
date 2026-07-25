@@ -57,13 +57,17 @@ install(TARGETS hyprfluidglass LIBRARY DESTINATION lib/hyprland)
 include(CTest)
 if(BUILD_TESTING)
     add_library(hyprfluidglass-v2-core STATIC
+        src/v2/ipc/Protocol.cpp
         src/v2/model/Config.cpp
         src/v2/model/Material.cpp
         src/v2/model/Readiness.cpp
         src/v2/model/Session.cpp
         src/v2/model/Target.cpp
     )
-    target_include_directories(hyprfluidglass-v2-core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_include_directories(hyprfluidglass-v2-core PUBLIC
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        "${HYPRFLUIDGLASS_JSON_INCLUDE}"
+    )
     target_compile_options(hyprfluidglass-v2-core PRIVATE -Wall -Wextra -Wpedantic)
 
     add_executable(hyprfluidglass-core-tests tests/core_tests.cpp)
@@ -103,4 +107,13 @@ if(BUILD_TESTING)
     target_link_libraries(hyprfluidglass-readiness-tests PRIVATE hyprfluidglass-v2-core)
     target_compile_options(hyprfluidglass-readiness-tests PRIVATE -Wall -Wextra -Wpedantic)
     add_test(NAME hyprfluidglass-readiness COMMAND hyprfluidglass-readiness-tests)
+
+    add_executable(hyprfluidglass-protocol-tests tests/protocol_tests.cpp)
+    target_include_directories(hyprfluidglass-protocol-tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests"
+        "${HYPRFLUIDGLASS_JSON_INCLUDE}"
+    )
+    target_link_libraries(hyprfluidglass-protocol-tests PRIVATE hyprfluidglass-v2-core)
+    target_compile_options(hyprfluidglass-protocol-tests PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME hyprfluidglass-protocol COMMAND hyprfluidglass-protocol-tests)
 endif()

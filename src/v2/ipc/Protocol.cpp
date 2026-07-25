@@ -1,0 +1,684 @@
+#include "v2/ipc/Protocol.hpp"
+
+#include "v2/core/Limits.hpp"
+#include "v2/model/Material.hpp"
+#include "v2/model/Target.hpp"
+
+#include <cmath>
+#include <cstdint>
+#include <exception>
+#include <limits>
+#include <set>
+#include <stdexcept>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+namespace hfg::v2 {
+namespace {
+
+using json = nlohmann::json;
+
+class ParseConstraintError final : public std::runtime_error {
+  public:
+    explicit ParseConstraintError(Error error)
+        : std::runtime_error(error.message), m_error(std::move(error)) {}
+
+    [[nodiscard]] const Error& error() const noexcept {
+        return m_error;
+    }
+
+  private:
+    Error m_error;
+};
+
+class StrictParseState {
+  public:
+    bool operator()(int depth, json::parse_event_t event, json& parsed) {
+        if (depth < 0 || static_cast<std::size_t>(depth) > Limits::MAX_JSON_NESTING) {
+            throw ParseConstraintError({
+                .code = ErrorCode::ResourceLimited,
+                .path = "",
+                .message = "JSON nesting limit exceeded",
+            });
+        }
+
+        const auto objectIndex = static_cast<std::size_t>(depth) + 1U;
+        const auto index = event == json::parse_event_t::key
+            ? static_cast<std::size_t>(depth)
+            : objectIndex;
+        if (m_objectKeys.size() <= index)
+            m_objectKeys.resize(index + 1U);
+
+        if (event == json::parse_event_t::object_start) {
+            m_objectKeys[index].clear();
+        } else if (event == json::parse_event_t::key) {
+            const auto& key = parsed.get_ref<const std::string&>();
+            if (!m_objectKeys[index].insert(key).second) {
+                throw ParseConstraintError({
+                    .code = ErrorCode::InvalidRequest,
+                    .path = key,
+                    .message = "duplicate field",
+                });
+            }
+        } else if (event == json::parse_event_t::object_end) {
+            m_objectKeys[index].clear();
+        }
+
+        return true;
+    }
+
+  private:
+    std::vector<std::set<std::string>> m_objectKeys;
+};
+
+template <typename T>
+Result<T> invalid(ErrorCode code, std::string path, std::string message) {
+    return Result<T>::failure({
+        .code = code,
+        .path = std::move(path),
+        .message = std::move(message),
+    });
+}
+
+std::optional<Error> rejectUnknown(
+    const json& object,
+    const std::set<std::string_view>& allowed,
+    std::string_view path,
+    ErrorCode code = ErrorCode::InvalidRequest) {
+    for (const auto& [key, value] : object.items()) {
+        static_cast<void>(value);
+        if (!allowed.contains(key))
+            return Error{
+                .code = code,
+                .path = path.empty() ? key : std::string(path) + "." + key,
+                .message = "unknown field",
+            };
+    }
+    return std::nullopt;
+}
+
+Result<std::string> requiredString(
+    const json& object,
+    std::string_view key,
+    std::string path,
+    ErrorCode code = ErrorCode::InvalidRequest) {
+    const auto value = object.find(key);
+    if (value == object.end() || !value->is_string())
+        return invalid<std::string>(code, std::move(path), "expected a string");
+    const auto result = value->get<std::string>();
+    if (result.empty() || result.size() > Limits::MAX_IDENTIFIER_BYTES)
+        return invalid<std::string>(code, std::move(path), "expected a non-empty string no longer than 128 bytes");
+    return Result<std::string>::success(result);
+}
+
+Result<std::uint64_t> requiredUnsigned(const json& object, std::string_view key, std::string path) {
+    const auto value = object.find(key);
+    if (value == object.end())
+        return invalid<std::uint64_t>(ErrorCode::InvalidRequest, std::move(path), "expected an integer");
+    if (value->is_number_unsigned())
+        return Result<std::uint64_t>::success(value->get<std::uint64_t>());
+    if (value->is_number_integer()) {
+        const auto signedValue = value->get<std::int64_t>();
+        if (signedValue >= 0)
+            return Result<std::uint64_t>::success(static_cast<std::uint64_t>(signedValue));
+    }
+    return invalid<std::uint64_t>(ErrorCode::InvalidRequest, std::move(path), "expected a non-negative integer");
+}
+
+std::optional<Error> assignNumber(
+    const json& object,
+    std::string_view key,
+    double& destination,
+    std::string path,
+    ErrorCode code) {
+    const auto value = object.find(key);
+    if (value == object.end())
+        return std::nullopt;
+    if (!value->is_number())
+        return Error{code, std::move(path), "expected a number"};
+    const double number = value->get<double>();
+    if (!std::isfinite(number))
+        return Error{code, std::move(path), "expected a finite number"};
+    destination = number;
+    return std::nullopt;
+}
+
+std::optional<Error> assignOptionalNumber(
+    const json& object,
+    std::string_view key,
+    std::optional<double>& destination,
+    std::string path,
+    ErrorCode code) {
+    const auto value = object.find(key);
+    if (value == object.end())
+        return std::nullopt;
+    if (!value->is_number())
+        return Error{code, std::move(path), "expected a number"};
+    const double number = value->get<double>();
+    if (!std::isfinite(number))
+        return Error{code, std::move(path), "expected a finite number"};
+    destination = number;
+    return std::nullopt;
+}
+
+std::optional<Error> assignBoolean(
+    const json& object,
+    std::string_view key,
+    bool& destination,
+    std::string path,
+    ErrorCode code) {
+    const auto value = object.find(key);
+    if (value == object.end())
+        return std::nullopt;
+    if (!value->is_boolean())
+        return Error{code, std::move(path), "expected a boolean"};
+    destination = value->get<bool>();
+    return std::nullopt;
+}
+
+std::optional<Error> assignString(
+    const json& object,
+    std::string_view key,
+    std::string& destination,
+    std::string path,
+    ErrorCode code) {
+    const auto value = object.find(key);
+    if (value == object.end())
+        return std::nullopt;
+    if (!value->is_string())
+        return Error{code, std::move(path), "expected a string"};
+    destination = value->get<std::string>();
+    return std::nullopt;
+}
+
+Result<Material> parseMaterial(std::string name, const json& object, std::string path) {
+    if (!object.is_object())
+        return invalid<Material>(ErrorCode::InvalidMaterial, std::move(path), "material must be an object");
+    static const std::set<std::string_view> fields{
+        "glass_level", "blur_level", "tint_level", "tint_enabled", "tint_color", "light_mode",
+        "refraction", "rim_band", "bevel", "rim_width", "highlight", "shadow", "light_angle",
+        "specular", "chroma", "edge_depth", "lens", "lens_band", "gloss",
+    };
+    if (auto error = rejectUnknown(object, fields, path, ErrorCode::InvalidMaterial))
+        return Result<Material>::failure(std::move(*error));
+
+    MaterialInput input;
+    if (auto error = assignNumber(object, "glass_level", input.glassLevel, path + ".glass_level", ErrorCode::InvalidMaterial)) return Result<Material>::failure(std::move(*error));
+    if (auto error = assignOptionalNumber(object, "blur_level", input.blurLevel, path + ".blur_level", ErrorCode::InvalidMaterial)) return Result<Material>::failure(std::move(*error));
+    if (auto error = assignOptionalNumber(object, "tint_level", input.tintLevel, path + ".tint_level", ErrorCode::InvalidMaterial)) return Result<Material>::failure(std::move(*error));
+    if (auto error = assignBoolean(object, "tint_enabled", input.tintEnabled, path + ".tint_enabled", ErrorCode::InvalidMaterial)) return Result<Material>::failure(std::move(*error));
+    if (auto error = assignString(object, "tint_color", input.tintColor, path + ".tint_color", ErrorCode::InvalidMaterial)) return Result<Material>::failure(std::move(*error));
+    if (auto error = assignBoolean(object, "light_mode", input.lightMode, path + ".light_mode", ErrorCode::InvalidMaterial)) return Result<Material>::failure(std::move(*error));
+    if (auto error = assignNumber(object, "refraction", input.refraction, path + ".refraction", ErrorCode::InvalidMaterial)) return Result<Material>::failure(std::move(*error));
+    if (auto error = assignNumber(object, "rim_band", input.rimBand, path + ".rim_band", ErrorCode::InvalidMaterial)) return Result<Material>::failure(std::move(*error));
+    if (auto error = assignNumber(object, "bevel", input.bevel, path + ".bevel", ErrorCode::InvalidMaterial)) return Result<Material>::failure(std::move(*error));
+    if (auto error = assignNumber(object, "rim_width", input.rimWidth, path + ".rim_width", ErrorCode::InvalidMaterial)) return Result<Material>::failure(std::move(*error));
+    if (auto error = assignNumber(object, "highlight", input.highlight, path + ".highlight", ErrorCode::InvalidMaterial)) return Result<Material>::failure(std::move(*error));
+    if (auto error = assignNumber(object, "shadow", input.shadow, path + ".shadow", ErrorCode::InvalidMaterial)) return Result<Material>::failure(std::move(*error));
+    if (auto error = assignNumber(object, "light_angle", input.lightAngle, path + ".light_angle", ErrorCode::InvalidMaterial)) return Result<Material>::failure(std::move(*error));
+    if (auto error = assignNumber(object, "specular", input.specular, path + ".specular", ErrorCode::InvalidMaterial)) return Result<Material>::failure(std::move(*error));
+    if (auto error = assignNumber(object, "chroma", input.chroma, path + ".chroma", ErrorCode::InvalidMaterial)) return Result<Material>::failure(std::move(*error));
+    if (auto error = assignNumber(object, "edge_depth", input.edgeDepth, path + ".edge_depth", ErrorCode::InvalidMaterial)) return Result<Material>::failure(std::move(*error));
+    if (auto error = assignNumber(object, "lens", input.lens, path + ".lens", ErrorCode::InvalidMaterial)) return Result<Material>::failure(std::move(*error));
+    if (auto error = assignNumber(object, "lens_band", input.lensBand, path + ".lens_band", ErrorCode::InvalidMaterial)) return Result<Material>::failure(std::move(*error));
+    if (auto error = assignNumber(object, "gloss", input.gloss, path + ".gloss", ErrorCode::InvalidMaterial)) return Result<Material>::failure(std::move(*error));
+
+    auto material = validateMaterial(std::move(name), input);
+    if (!material) {
+        auto error = material.error();
+        error.path = path + (error.path.empty() ? "" : "." + error.path);
+        return Result<Material>::failure(std::move(error));
+    }
+    return material;
+}
+
+Result<Rect> parseRect(const json& object, std::string path, std::string_view expectedSpace) {
+    if (!object.is_object())
+        return invalid<Rect>(ErrorCode::InvalidTarget, std::move(path), "geometry must be an object");
+    static const std::set<std::string_view> fields{"space", "x", "y", "width", "height"};
+    if (auto error = rejectUnknown(object, fields, path, ErrorCode::InvalidTarget))
+        return Result<Rect>::failure(std::move(*error));
+    const auto space = requiredString(object, "space", path + ".space", ErrorCode::InvalidTarget);
+    if (!space)
+        return Result<Rect>::failure(space.error());
+    if (space.value() != expectedSpace)
+        return invalid<Rect>(ErrorCode::InvalidTarget, path + ".space", "unexpected geometry space");
+
+    Rect rect;
+    for (const auto& [key, destination] : {
+             std::pair<std::string_view, double*>{"x", &rect.x},
+             {"y", &rect.y},
+             {"width", &rect.width},
+             {"height", &rect.height},
+         }) {
+        const auto value = object.find(key);
+        if (value == object.end() || !value->is_number())
+            return invalid<Rect>(ErrorCode::InvalidTarget, path + "." + std::string(key), "expected a number");
+        *destination = value->get<double>();
+        if (!std::isfinite(*destination))
+            return invalid<Rect>(ErrorCode::InvalidTarget, path + "." + std::string(key), "expected a finite number");
+    }
+    return Result<Rect>::success(rect);
+}
+
+Result<Shape> parseShape(const json& object, std::string path) {
+    if (!object.is_object())
+        return invalid<Shape>(ErrorCode::InvalidTarget, std::move(path), "shape must be an object");
+    const auto kind = requiredString(object, "kind", path + ".kind", ErrorCode::InvalidTarget);
+    if (!kind)
+        return Result<Shape>::failure(kind.error());
+
+    if (kind.value() == "rounded-rect") {
+        static const std::set<std::string_view> fields{"kind", "radius"};
+        if (auto error = rejectUnknown(object, fields, path, ErrorCode::InvalidTarget))
+            return Result<Shape>::failure(std::move(*error));
+        RoundedRectShape shape;
+        if (auto error = assignNumber(object, "radius", shape.radius, path + ".radius", ErrorCode::InvalidTarget))
+            return Result<Shape>::failure(std::move(*error));
+        return Result<Shape>::success(shape);
+    }
+    if (kind.value() == "ring") {
+        static const std::set<std::string_view> fields{"kind", "outer_radius", "thickness"};
+        if (auto error = rejectUnknown(object, fields, path, ErrorCode::InvalidTarget))
+            return Result<Shape>::failure(std::move(*error));
+        RingShape shape;
+        if (auto error = assignNumber(object, "outer_radius", shape.outerRadius, path + ".outer_radius", ErrorCode::InvalidTarget))
+            return Result<Shape>::failure(std::move(*error));
+        if (auto error = assignNumber(object, "thickness", shape.thickness, path + ".thickness", ErrorCode::InvalidTarget))
+            return Result<Shape>::failure(std::move(*error));
+        return Result<Shape>::success(shape);
+    }
+    if (kind.value() == "compound") {
+        static const std::set<std::string_view> fields{"kind", "parts"};
+        if (auto error = rejectUnknown(object, fields, path, ErrorCode::InvalidTarget))
+            return Result<Shape>::failure(std::move(*error));
+        const auto parts = object.find("parts");
+        if (parts == object.end() || !parts->is_array())
+            return invalid<Shape>(ErrorCode::InvalidTarget, path + ".parts", "parts must be an array");
+        if (parts->size() > Limits::MAX_COMPOUND_PARTS)
+            return invalid<Shape>(ErrorCode::ResourceLimited, path + ".parts", "compound part limit exceeded");
+
+        CompoundShape shape;
+        for (std::size_t index = 0; index < parts->size(); ++index) {
+            const auto& part = (*parts)[index];
+            const auto partPath = path + ".parts[" + std::to_string(index) + "]";
+            if (!part.is_object())
+                return invalid<Shape>(ErrorCode::InvalidTarget, partPath, "compound part must be an object");
+            static const std::set<std::string_view> partFields{"x", "y", "width", "height", "radius"};
+            if (auto error = rejectUnknown(part, partFields, partPath, ErrorCode::InvalidTarget))
+                return Result<Shape>::failure(std::move(*error));
+            CompoundPart parsed;
+            for (const auto& [key, destination] : {
+                     std::pair<std::string_view, double*>{"x", &parsed.rect.x},
+                     {"y", &parsed.rect.y},
+                     {"width", &parsed.rect.width},
+                     {"height", &parsed.rect.height},
+                     {"radius", &parsed.radius},
+                 }) {
+                const auto value = part.find(key);
+                if (value == part.end() || !value->is_number())
+                    return invalid<Shape>(ErrorCode::InvalidTarget, partPath + "." + std::string(key), "expected a number");
+                *destination = value->get<double>();
+                if (!std::isfinite(*destination))
+                    return invalid<Shape>(ErrorCode::InvalidTarget, partPath + "." + std::string(key), "expected a finite number");
+            }
+            shape.parts.push_back(parsed);
+        }
+        return Result<Shape>::success(std::move(shape));
+    }
+    return invalid<Shape>(ErrorCode::InvalidTarget, path + ".kind", "unsupported shape kind");
+}
+
+Result<MaterialReference> parseMaterialReference(const json& object, std::string path) {
+    if (!object.is_object())
+        return invalid<MaterialReference>(ErrorCode::InvalidTarget, std::move(path), "material reference must be an object");
+    static const std::set<std::string_view> fields{"source", "name"};
+    if (auto error = rejectUnknown(object, fields, path, ErrorCode::InvalidTarget))
+        return Result<MaterialReference>::failure(std::move(*error));
+    const auto source = requiredString(object, "source", path + ".source", ErrorCode::InvalidTarget);
+    const auto name = requiredString(object, "name", path + ".name", ErrorCode::InvalidTarget);
+    if (!source)
+        return Result<MaterialReference>::failure(source.error());
+    if (!name)
+        return Result<MaterialReference>::failure(name.error());
+    MaterialSource parsedSource;
+    if (source.value() == "session")
+        parsedSource = MaterialSource::Session;
+    else if (source.value() == "config")
+        parsedSource = MaterialSource::Config;
+    else
+        return invalid<MaterialReference>(ErrorCode::InvalidTarget, path + ".source", "source must be session or config");
+    return Result<MaterialReference>::success({
+        .source = parsedSource,
+        .name = name.value(),
+    });
+}
+
+std::optional<RenderStage> parseStage(std::string_view value) {
+    if (value == "post-wallpaper") return RenderStage::PostWallpaper;
+    if (value == "pre-window") return RenderStage::PreWindow;
+    if (value == "post-windows") return RenderStage::PostWindows;
+    if (value == "post-layer") return RenderStage::PostLayer;
+    return std::nullopt;
+}
+
+Result<Target> parseTarget(const json& object, std::size_t index) {
+    const auto path = "targets[" + std::to_string(index) + "]";
+    if (!object.is_object())
+        return invalid<Target>(ErrorCode::InvalidTarget, path, "target must be an object");
+    static const std::set<std::string_view> fields{
+        "id", "kind", "selector", "geometry", "stage", "material", "shape", "enabled",
+    };
+    if (auto error = rejectUnknown(object, fields, path, ErrorCode::InvalidTarget))
+        return Result<Target>::failure(std::move(*error));
+
+    const auto id = requiredString(object, "id", path + ".id", ErrorCode::InvalidTarget);
+    const auto kind = requiredString(object, "kind", path + ".kind", ErrorCode::InvalidTarget);
+    if (!id) return Result<Target>::failure(id.error());
+    if (!kind) return Result<Target>::failure(kind.error());
+    const auto materialValue = object.find("material");
+    const auto shapeValue = object.find("shape");
+    const auto selectorValue = object.find("selector");
+    if (materialValue == object.end())
+        return invalid<Target>(ErrorCode::InvalidTarget, path + ".material", "material reference is required");
+    if (shapeValue == object.end())
+        return invalid<Target>(ErrorCode::InvalidTarget, path + ".shape", "shape is required");
+    if (selectorValue == object.end() || !selectorValue->is_object())
+        return invalid<Target>(ErrorCode::InvalidTarget, path + ".selector", "selector must be an object");
+    auto material = parseMaterialReference(*materialValue, path + ".material");
+    auto shape = parseShape(*shapeValue, path + ".shape");
+    if (!material) return Result<Target>::failure(material.error());
+    if (!shape) return Result<Target>::failure(shape.error());
+
+    TargetInput input{
+        .id = id.value(),
+        .kind = TargetKind::Region,
+        .material = std::move(material.value()),
+        .shape = std::move(shape.value()),
+        .selector = RegionSelector{},
+        .geometry = std::nullopt,
+        .stage = std::nullopt,
+        .enabled = true,
+    };
+    if (auto enabled = object.find("enabled"); enabled != object.end()) {
+        if (!enabled->is_boolean())
+            return invalid<Target>(ErrorCode::InvalidTarget, path + ".enabled", "expected a boolean");
+        input.enabled = enabled->get<bool>();
+    }
+
+    if (kind.value() == "window") {
+        input.kind = TargetKind::Window;
+        static const std::set<std::string_view> selectorFields{"address", "pid", "initial_class"};
+        if (auto error = rejectUnknown(*selectorValue, selectorFields, path + ".selector", ErrorCode::InvalidTarget))
+            return Result<Target>::failure(std::move(*error));
+        const auto address = requiredString(*selectorValue, "address", path + ".selector.address", ErrorCode::InvalidTarget);
+        if (!address) return Result<Target>::failure(address.error());
+        WindowSelector selector{
+            .address = address.value(),
+            .pid = std::nullopt,
+            .initialClass = std::nullopt,
+        };
+        if (auto pid = selectorValue->find("pid"); pid != selectorValue->end()) {
+            if (pid->is_number_unsigned()) {
+                const auto value = pid->get<std::uint64_t>();
+                if (value == 0 || value > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()))
+                    return invalid<Target>(ErrorCode::InvalidTarget, path + ".selector.pid", "expected a positive signed 64-bit integer");
+                selector.pid = static_cast<std::int64_t>(value);
+            } else if (pid->is_number_integer()) {
+                const auto value = pid->get<std::int64_t>();
+                if (value <= 0)
+                    return invalid<Target>(ErrorCode::InvalidTarget, path + ".selector.pid", "expected a positive signed 64-bit integer");
+                selector.pid = value;
+            } else {
+                return invalid<Target>(ErrorCode::InvalidTarget, path + ".selector.pid", "expected a positive signed 64-bit integer");
+            }
+        }
+        if (auto initialClass = selectorValue->find("initial_class"); initialClass != selectorValue->end()) {
+            const auto parsed = requiredString(
+                *selectorValue,
+                "initial_class",
+                path + ".selector.initial_class",
+                ErrorCode::InvalidTarget);
+            if (!parsed)
+                return Result<Target>::failure(parsed.error());
+            selector.initialClass = parsed.value();
+        }
+        input.selector = std::move(selector);
+        if (object.contains("geometry"))
+            return invalid<Target>(ErrorCode::InvalidTarget, path + ".geometry", "window targets use compositor-owned window geometry");
+        if (object.contains("stage"))
+            return invalid<Target>(ErrorCode::InvalidTarget, path + ".stage", "window targets use the window decoration stage");
+    } else if (kind.value() == "layer") {
+        input.kind = TargetKind::Layer;
+        static const std::set<std::string_view> selectorFields{"namespace"};
+        if (auto error = rejectUnknown(*selectorValue, selectorFields, path + ".selector", ErrorCode::InvalidTarget))
+            return Result<Target>::failure(std::move(*error));
+        const auto layerNamespace = requiredString(*selectorValue, "namespace", path + ".selector.namespace", ErrorCode::InvalidTarget);
+        if (!layerNamespace) return Result<Target>::failure(layerNamespace.error());
+        input.selector = LayerSelector{.namespaceName = layerNamespace.value()};
+        if (auto geometry = object.find("geometry"); geometry != object.end()) {
+            auto parsed = parseRect(*geometry, path + ".geometry", "surface-local");
+            if (!parsed) return Result<Target>::failure(parsed.error());
+            input.geometry = parsed.value();
+        }
+        if (object.contains("stage"))
+            return invalid<Target>(ErrorCode::InvalidTarget, path + ".stage", "layer targets derive their render stage from the attached surface");
+    } else if (kind.value() == "region") {
+        input.kind = TargetKind::Region;
+        static const std::set<std::string_view> selectorFields{"output"};
+        if (auto error = rejectUnknown(*selectorValue, selectorFields, path + ".selector", ErrorCode::InvalidTarget))
+            return Result<Target>::failure(std::move(*error));
+        const auto output = requiredString(*selectorValue, "output", path + ".selector.output", ErrorCode::InvalidTarget);
+        if (!output) return Result<Target>::failure(output.error());
+        input.selector = RegionSelector{.output = output.value()};
+        const auto geometry = object.find("geometry");
+        if (geometry == object.end())
+            return invalid<Target>(ErrorCode::InvalidTarget, path + ".geometry", "region geometry is required");
+        auto parsed = parseRect(*geometry, path + ".geometry", "output-logical");
+        if (!parsed) return Result<Target>::failure(parsed.error());
+        input.geometry = parsed.value();
+        const auto stage = requiredString(object, "stage", path + ".stage", ErrorCode::InvalidTarget);
+        if (!stage) return Result<Target>::failure(stage.error());
+        input.stage = parseStage(stage.value());
+        if (!input.stage)
+            return invalid<Target>(ErrorCode::InvalidTarget, path + ".stage", "unsupported render stage");
+    } else {
+        return invalid<Target>(ErrorCode::InvalidTarget, path + ".kind", "unsupported target kind");
+    }
+
+    auto target = validateTarget(std::move(input));
+    if (!target) {
+        auto error = target.error();
+        error.path = path + (error.path.empty() ? "" : "." + error.path);
+        return Result<Target>::failure(std::move(error));
+    }
+    return target;
+}
+
+Result<Request> parseDocument(const json& document) {
+    if (!document.is_object())
+        return invalid<Request>(ErrorCode::InvalidRequest, "", "request must be an object");
+    const auto version = requiredUnsigned(document, "version", "version");
+    if (!version)
+        return Result<Request>::failure(version.error());
+    if (version.value() != 2U)
+        return invalid<Request>(ErrorCode::UnsupportedVersion, "version", "protocol version must be 2");
+    const auto operation = requiredString(document, "operation", "operation");
+    if (!operation)
+        return Result<Request>::failure(operation.error());
+
+    std::optional<std::string> requestId;
+    if (auto value = document.find("request_id"); value != document.end()) {
+        if (!value->is_string())
+            return invalid<Request>(ErrorCode::InvalidRequest, "request_id", "expected a string");
+        const auto parsed = value->get<std::string>();
+        if (parsed.empty() || parsed.size() > Limits::MAX_IDENTIFIER_BYTES)
+            return invalid<Request>(ErrorCode::InvalidRequest, "request_id", "expected a non-empty string no longer than 128 bytes");
+        requestId = parsed;
+    }
+
+    const auto finish = [&](RequestBody body, std::set<std::string_view> fields) -> Result<Request> {
+        fields.insert("version");
+        fields.insert("operation");
+        fields.insert("request_id");
+        if (auto error = rejectUnknown(document, fields, ""))
+            return Result<Request>::failure(std::move(*error));
+        return Result<Request>::success({
+            .requestId = requestId,
+            .body = std::move(body),
+        });
+    };
+
+    if (operation.value() == "capabilities")
+        return finish(CapabilitiesRequest{}, {});
+    if (operation.value() == "status")
+        return finish(StatusRequest{}, {});
+    if (operation.value() == "session.open") {
+        const auto clientId = requiredString(document, "client_id", "client_id");
+        const auto mode = requiredString(document, "mode", "mode");
+        if (!clientId) return Result<Request>::failure(clientId.error());
+        if (!mode) return Result<Request>::failure(mode.error());
+        SessionMode parsedMode;
+        if (mode.value() == "client")
+            parsedMode = SessionMode::Client;
+        else if (mode.value() == "preview")
+            parsedMode = SessionMode::Preview;
+        else
+            return invalid<Request>(ErrorCode::InvalidRequest, "mode", "mode must be client or preview");
+        return finish(OpenSessionRequest{.clientId = clientId.value(), .mode = parsedMode}, {"client_id", "mode"});
+    }
+    if (operation.value() == "session.replace") {
+        const auto sessionId = requiredString(document, "session_id", "session_id");
+        const auto token = requiredString(document, "token", "token");
+        const auto generation = requiredUnsigned(document, "generation", "generation");
+        if (!sessionId) return Result<Request>::failure(sessionId.error());
+        if (!token) return Result<Request>::failure(token.error());
+        if (!generation) return Result<Request>::failure(generation.error());
+
+        SessionReplacement replacement{
+            .generation = generation.value(),
+            .materials = {},
+            .targets = {},
+        };
+        const auto materials = document.find("materials");
+        if (materials == document.end() || !materials->is_object())
+            return invalid<Request>(ErrorCode::InvalidRequest, "materials", "materials must be an object");
+        if (materials->size() > Limits::MAX_MATERIALS_PER_OWNER)
+            return invalid<Request>(ErrorCode::ResourceLimited, "materials", "material limit exceeded");
+        for (const auto& [name, value] : materials->items()) {
+            auto material = parseMaterial(name, value, "materials." + name);
+            if (!material) return Result<Request>::failure(material.error());
+            replacement.materials.emplace(name, std::move(material.value()));
+        }
+
+        const auto targets = document.find("targets");
+        if (targets == document.end() || !targets->is_array())
+            return invalid<Request>(ErrorCode::InvalidRequest, "targets", "targets must be an array");
+        if (targets->size() > Limits::MAX_TARGETS_PER_SESSION)
+            return invalid<Request>(ErrorCode::ResourceLimited, "targets", "per-session target limit exceeded");
+        for (std::size_t index = 0; index < targets->size(); ++index) {
+            auto target = parseTarget((*targets)[index], index);
+            if (!target) return Result<Request>::failure(target.error());
+            replacement.targets.push_back(std::move(target.value()));
+        }
+        return finish(ReplaceSessionRequest{
+            .sessionId = sessionId.value(),
+            .token = token.value(),
+            .replacement = std::move(replacement),
+        }, {"session_id", "token", "generation", "materials", "targets"});
+    }
+    if (operation.value() == "session.heartbeat") {
+        const auto sessionId = requiredString(document, "session_id", "session_id");
+        const auto token = requiredString(document, "token", "token");
+        const auto generation = requiredUnsigned(document, "generation", "generation");
+        if (!sessionId) return Result<Request>::failure(sessionId.error());
+        if (!token) return Result<Request>::failure(token.error());
+        if (!generation) return Result<Request>::failure(generation.error());
+        return finish(HeartbeatSessionRequest{
+            .sessionId = sessionId.value(),
+            .token = token.value(),
+            .generation = generation.value(),
+        }, {"session_id", "token", "generation"});
+    }
+    if (operation.value() == "session.close") {
+        const auto sessionId = requiredString(document, "session_id", "session_id");
+        const auto token = requiredString(document, "token", "token");
+        if (!sessionId) return Result<Request>::failure(sessionId.error());
+        if (!token) return Result<Request>::failure(token.error());
+        return finish(CloseSessionRequest{
+            .sessionId = sessionId.value(),
+            .token = token.value(),
+        }, {"session_id", "token"});
+    }
+    if (operation.value() == "target.inspect") {
+        const auto sessionId = requiredString(document, "session_id", "session_id");
+        const auto token = requiredString(document, "token", "token");
+        const auto targetId = requiredString(document, "target_id", "target_id");
+        if (!sessionId) return Result<Request>::failure(sessionId.error());
+        if (!token) return Result<Request>::failure(token.error());
+        if (!targetId) return Result<Request>::failure(targetId.error());
+        return finish(InspectTargetRequest{
+            .sessionId = sessionId.value(),
+            .token = token.value(),
+            .targetId = targetId.value(),
+        }, {"session_id", "token", "target_id"});
+    }
+
+    return invalid<Request>(ErrorCode::UnsupportedOperation, "operation", "unsupported operation");
+}
+
+} // namespace
+
+Result<Request> parseRequest(std::string_view payload) {
+    if (payload.size() > Limits::MAX_REQUEST_BYTES)
+        return invalid<Request>(ErrorCode::ResourceLimited, "", "request exceeds 256 KiB");
+    try {
+        StrictParseState state;
+        return parseDocument(json::parse(
+            payload,
+            [&state](int depth, json::parse_event_t event, json& parsed) {
+                return state(depth, event, parsed);
+            }));
+    } catch (const ParseConstraintError& error) {
+        return Result<Request>::failure(error.error());
+    } catch (const json::parse_error&) {
+        return invalid<Request>(ErrorCode::InvalidJson, "", "request is not valid JSON");
+    } catch (const json::exception&) {
+        return invalid<Request>(ErrorCode::InvalidRequest, "", "request contains an invalid JSON value");
+    } catch (const std::exception&) {
+        return invalid<Request>(ErrorCode::InvalidRequest, "", "request could not be validated");
+    }
+}
+
+std::string successResponse(
+    const std::optional<std::string>& requestId,
+    const nlohmann::json& result) {
+    json response{
+        {"ok", true},
+        {"version", 2},
+        {"result", result},
+    };
+    if (requestId)
+        response["request_id"] = *requestId;
+    return response.dump(-1, ' ', false, json::error_handler_t::replace);
+}
+
+std::string failureResponse(
+    const std::optional<std::string>& requestId,
+    const Error& error) {
+    json response{
+        {"ok", false},
+        {"version", 2},
+        {"error", {
+            {"code", errorCodeName(error.code)},
+            {"path", error.path},
+            {"message", error.message},
+        }},
+    };
+    if (requestId)
+        response["request_id"] = *requestId;
+    return response.dump(-1, ' ', false, json::error_handler_t::replace);
+}
+
+} // namespace hfg::v2
