@@ -1,11 +1,8 @@
 # HyprFluidGlass v2 architecture
 
-Status: approved design; implementation in progress.
-
-This document defines the architectural boundary for HyprFluidGlass v2. It is
-the source of truth for implementation decisions, but it is not a claim that
-every v2 feature is available in the current build. User-facing documentation
-must label features that have not yet landed.
+This document defines the public architectural boundary for HyprFluidGlass v2.
+See the release documentation for the features available in a particular
+version.
 
 ## Purpose
 
@@ -244,9 +241,8 @@ accepted.
 Materials are named, validated values independent of target identity. A target
 references a material and may use only the documented, bounded overrides.
 
-V2 preserves the current visual shader as the compatibility baseline while the
-surrounding lifecycle and API are replaced. Visual changes are reviewed
-separately from architectural corrections.
+V2 preserves the established fluid-glass appearance while replacing the
+surrounding lifecycle and API.
 
 The initial shape vocabulary is generic:
 
@@ -321,20 +317,4 @@ V2 does not:
 Hyprland plugins are ABI-coupled to Hyprland. HyprFluidGlass supports explicitly
 tested Hyprland release pins. New releases are added after build and live
 validation; support is not inferred merely because the source compiles.
-
-## Implementation order
-
-The v2 implementation proceeds in controlled stages:
-
-1. Freeze architecture, configuration, protocol, and edge-case contracts.
-2. Harden build and plugin lifecycle behavior.
-3. Build pure validated models, transactions, sessions, and readiness.
-4. Register the native Lua and versioned runtime APIs in an inert state.
-5. Review geometry, transform, fractional-scale, and HDR findings separately.
-6. Build the parallel v2 render foundation while preserving the v1 live path.
-7. Add window, layer, and region adapters.
-8. Add capture reuse, bounded damage, and output-generation cleanup.
-9. Enable opt-in live v2 and complete visual acceptance.
-10. Publish integrations and migration guidance.
-11. Make v2 the default only after compatibility and release checks pass.
 
