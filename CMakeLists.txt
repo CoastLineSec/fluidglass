@@ -53,3 +53,14 @@ set_target_properties(hyprfluidglass PROPERTIES
 )
 
 install(TARGETS hyprfluidglass LIBRARY DESTINATION lib/hyprland)
+
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(hyprfluidglass-core-tests tests/core_tests.cpp)
+    target_include_directories(hyprfluidglass-core-tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests"
+    )
+    target_compile_options(hyprfluidglass-core-tests PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME hyprfluidglass-core COMMAND hyprfluidglass-core-tests)
+endif()
