@@ -199,6 +199,21 @@ reuse backdrop captured at another application's position in the window stack.
 Region targets cannot request `pre-window` because they do not identify a
 window.
 
+## Render hooks
+
+The v2 stages map to Hyprland's render hooks as follows:
+
+| v2 stage | Hyprland hook |
+|---|---|
+| `post-wallpaper` | `RENDER_POST_WALLPAPER` |
+| `pre-window` | `RENDER_PRE_WINDOW` for the exact attached window |
+| `post-windows` | `RENDER_POST_WINDOWS` |
+| `post-layer` | `RENDER_LAST_MOMENT` |
+
+Capture scheduling is tracked independently for every output frame and output
+generation. If Hyprland emits the same hook more than once for a window pass,
+the same capture resource is copied only once in that frame.
+
 The renderer adapter reports bytes per pixel and allocation limits for the
 actual DRM format. The planner does not infer a memory layout from a fourcc or
 substitute a different format. Capture resources are framebuffer-tested before

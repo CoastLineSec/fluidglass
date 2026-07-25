@@ -84,6 +84,7 @@ add_library(hyprfluidglass-v2-core STATIC
     src/v2/render/MaterialSampling.cpp
     src/v2/render/OutputGeneration.cpp
     src/v2/render/PresentationScene.cpp
+    src/v2/render/RenderStageScheduler.cpp
     src/v2/runtime/Runtime.cpp
     src/v2/targets/Attachment.cpp
     src/v2/targets/LayerAdapter.cpp
@@ -230,6 +231,12 @@ if(BUILD_TESTING)
     target_link_libraries(hyprfluidglass-capture-environment-tests PRIVATE hyprfluidglass-v2-core)
     target_compile_options(hyprfluidglass-capture-environment-tests PRIVATE -Wall -Wextra -Wpedantic)
     add_test(NAME hyprfluidglass-capture-environment COMMAND hyprfluidglass-capture-environment-tests)
+
+    add_executable(hyprfluidglass-render-stage-scheduler-tests tests/render_stage_scheduler_tests.cpp)
+    target_include_directories(hyprfluidglass-render-stage-scheduler-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+    target_link_libraries(hyprfluidglass-render-stage-scheduler-tests PRIVATE hyprfluidglass-v2-core)
+    target_compile_options(hyprfluidglass-render-stage-scheduler-tests PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME hyprfluidglass-render-stage-scheduler COMMAND hyprfluidglass-render-stage-scheduler-tests)
 
     add_executable(
         hyprfluidglass-hyprland-capture-format-tests
