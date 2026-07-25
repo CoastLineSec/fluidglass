@@ -181,6 +181,19 @@ Result<void> SessionManager::close(std::string_view sessionId, std::string_view 
     return Result<void>::success();
 }
 
+Result<SessionSnapshot> SessionManager::inspect(
+    std::string_view sessionId,
+    std::string_view token,
+    std::uint64_t nowMs) {
+    sweepExpired(nowMs);
+    const auto record = m_sessions.find(std::string(sessionId));
+    if (record == m_sessions.end())
+        return failure<SessionSnapshot>(ErrorCode::SessionNotFound, "session_id", "session not found");
+    if (record->second.token != token)
+        return failure<SessionSnapshot>(ErrorCode::InvalidToken, "token", "invalid session token");
+    return Result<SessionSnapshot>::success(snapshotFor(record->second));
+}
+
 std::vector<ExpiredSession> SessionManager::expire(std::uint64_t nowMs) {
     sweepExpired(nowMs);
     auto expired = std::move(m_pendingExpired);
@@ -197,6 +210,13 @@ void SessionManager::sweepExpired(std::uint64_t nowMs) {
         m_pendingExpired.push_back({
             .owner = ownerFor(record->second),
             .generation = record->second.generation,
+            .targetIds = [&record] {
+                std::vector<std::string> ids;
+                ids.reserve(record->second.targets.size());
+                for (const auto& target : record->second.targets)
+                    ids.push_back(target.id);
+                return ids;
+            }(),
         });
         record = m_sessions.erase(record);
     }
@@ -208,6 +228,16 @@ std::optional<SessionSnapshot> SessionManager::snapshot(std::string_view session
     if (record == m_sessions.end())
         return std::nullopt;
     return snapshotFor(record->second);
+}
+
+std::vector<SessionSnapshot> SessionManager::snapshots() const {
+    std::vector<SessionSnapshot> result;
+    result.reserve(m_sessions.size());
+    for (const auto& [sessionId, record] : m_sessions) {
+        static_cast<void>(sessionId);
+        result.push_back(snapshotFor(record));
+    }
+    return result;
 }
 
 std::size_t SessionManager::sessionCount() const noexcept {

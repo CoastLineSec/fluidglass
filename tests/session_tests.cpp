@@ -132,15 +132,48 @@ int main() {
             require(renewed.value().expiresAtMs == 1'000 + Limits::CLIENT_LEASE_MS, "lease was not renewed");
             require(!fixture.manager.heartbeat(handle.sessionId, handle.token, 1, 1'001), "wrong generation must fail");
         }},
+        Case{"inspection authenticates without renewing", [] {
+            Fixture fixture;
+            const auto handle = fixture.manager.open("shell", SessionMode::Client, 100).value();
+            const auto inspected = fixture.manager.inspect(handle.sessionId, handle.token, 1'000);
+            require(inspected.hasValue(), "valid inspection must succeed");
+            require(inspected.value().expiresAtMs == handle.expiresAtMs, "inspection renewed the lease");
+            const auto wrongToken = fixture.manager.inspect(handle.sessionId, "wrong", 1'001);
+            require(!wrongToken && wrongToken.error().code == ErrorCode::InvalidToken,
+                    "inspection accepted a wrong token");
+        }},
         Case{"expiry removes only expired owner", [] {
             Fixture fixture;
             const auto preview = fixture.manager.open("settings", SessionMode::Preview, 0).value();
             const auto client = fixture.manager.open("shell", SessionMode::Client, 0).value();
+            SessionReplacement replacement{
+                .generation = 1,
+                .materials = {{"glass", material("glass")}},
+                .targets = {target("preview", MaterialSource::Session, "glass")},
+            };
+            require(fixture.manager.replace(
+                preview.sessionId,
+                preview.token,
+                std::move(replacement),
+                {},
+                0).hasValue(), "preview replacement failed");
             const auto expired = fixture.manager.expire(Limits::PREVIEW_LEASE_MS);
             require(expired.size() == 1, "one preview should expire");
             require(expired[0].owner.starts_with("preview:settings:"), "expired owner identity is wrong");
+            require(expired[0].targetIds == std::vector<std::string>{"preview"},
+                    "expired target identities were lost");
             require(!fixture.manager.snapshot(preview.sessionId), "expired preview remained live");
             require(fixture.manager.snapshot(client.sessionId).has_value(), "client expired too early");
+        }},
+        Case{"snapshot enumeration excludes tokens", [] {
+            Fixture fixture;
+            const auto alpha = fixture.manager.open("alpha", SessionMode::Client, 0);
+            const auto beta = fixture.manager.open("beta", SessionMode::Preview, 0);
+            require(alpha && beta, "sessions must open");
+            const auto snapshots = fixture.manager.snapshots();
+            require(snapshots.size() == 2, "snapshot enumeration lost sessions");
+            require(snapshots[0].owner.starts_with("client:alpha:"), "client owner is wrong");
+            require(snapshots[1].owner.starts_with("preview:beta:"), "preview owner is wrong");
         }},
         Case{"close is briefly idempotent", [] {
             Fixture fixture;

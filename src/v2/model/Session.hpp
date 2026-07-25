@@ -46,8 +46,9 @@ struct SessionSnapshot {
 };
 
 struct ExpiredSession {
-    std::string owner;
+    std::string              owner;
     std::uint64_t generation = 0;
+    std::vector<std::string> targetIds;
 };
 
 class SessionManager {
@@ -76,8 +77,14 @@ class SessionManager {
         std::string_view token,
         std::uint64_t nowMs);
 
+    [[nodiscard]] Result<SessionSnapshot> inspect(
+        std::string_view sessionId,
+        std::string_view token,
+        std::uint64_t nowMs);
+
     [[nodiscard]] std::vector<ExpiredSession> expire(std::uint64_t nowMs);
     [[nodiscard]] std::optional<SessionSnapshot> snapshot(std::string_view sessionId) const;
+    [[nodiscard]] std::vector<SessionSnapshot> snapshots() const;
 
     [[nodiscard]] std::size_t sessionCount() const noexcept;
     [[nodiscard]] std::size_t targetCount() const noexcept;
