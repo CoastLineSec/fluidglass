@@ -14,6 +14,8 @@ namespace hfg::v2 {
 
 class HyprlandLayerCatalog {
   public:
+    [[nodiscard]] Result<std::vector<LayerSurfaceSnapshot>>
+    allSnapshots();
     [[nodiscard]] Result<std::vector<LayerSurfaceSnapshot>> snapshots(
         std::string_view namespaceName);
 

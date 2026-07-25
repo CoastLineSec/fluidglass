@@ -69,12 +69,7 @@ Result<std::uint64_t> HyprlandLayerCatalog::tokenFor(
 }
 
 Result<std::vector<LayerSurfaceSnapshot>>
-HyprlandLayerCatalog::snapshots(std::string_view namespaceName) {
-    if (!validNamespace(namespaceName))
-        return unavailable(
-            ErrorCode::InvalidRequest,
-            "namespace",
-            "expected a non-empty bounded layer namespace");
+HyprlandLayerCatalog::allSnapshots() {
     if (!g_pCompositor)
         return unavailable(
             ErrorCode::UnsupportedOperation,
@@ -91,8 +86,7 @@ HyprlandLayerCatalog::snapshots(std::string_view namespaceName) {
         for (const auto& level : monitor->m_layerSurfaceLayers) {
             for (const auto& reference : level) {
                 const auto surface = reference.lock();
-                if (!surface ||
-                    surface->m_namespace != namespaceName)
+                if (!surface)
                     continue;
                 const auto mappedLevel = layerLevel(surface->m_layer);
                 if (!mappedLevel)
@@ -125,13 +119,40 @@ HyprlandLayerCatalog::snapshots(std::string_view namespaceName) {
                     .fadingOut = surface->m_fadingOut,
                     .readyToDelete = surface->m_readyToDelete,
                 });
-                if (result.size() > Limits::MAX_PRESENTATIONS_PER_TARGET)
+                if (result.size() > Limits::MAX_COMPOSITOR_OBJECTS)
                     return unavailable(
                         ErrorCode::ResourceLimited,
                         "layers",
-                        "matching layer surface count exceeds the supported limit");
+                        "compositor layer count exceeds the supported limit");
             }
         }
+    }
+    return Result<std::vector<LayerSurfaceSnapshot>>::success(
+        std::move(result));
+}
+
+Result<std::vector<LayerSurfaceSnapshot>>
+HyprlandLayerCatalog::snapshots(
+    std::string_view namespaceName) {
+    if (!validNamespace(namespaceName))
+        return unavailable(
+            ErrorCode::InvalidRequest,
+            "namespace",
+            "expected a non-empty bounded layer namespace");
+    auto all = allSnapshots();
+    if (!all)
+        return all;
+
+    std::vector<LayerSurfaceSnapshot> result;
+    for (auto& snapshot : all.value()) {
+        if (snapshot.namespaceName != namespaceName)
+            continue;
+        result.push_back(std::move(snapshot));
+        if (result.size() > Limits::MAX_PRESENTATIONS_PER_TARGET)
+            return unavailable(
+                ErrorCode::ResourceLimited,
+                "layers",
+                "matching layer surface count exceeds the supported limit");
     }
     return Result<std::vector<LayerSurfaceSnapshot>>::success(
         std::move(result));
