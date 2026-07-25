@@ -1,6 +1,7 @@
 # Lua configuration reference
 
-Status: v2 contract; implementation in progress.
+Availability: planned for HyprFluidGlass v2; not available in the current
+release.
 
 HyprFluidGlass v2 uses Hyprland's native Lua configuration API for durable
 materials and attachment rules. Runtime shells should use the session API
@@ -288,4 +289,3 @@ On failure:
 
 The error path identifies the rejected field without echoing unrelated
 configuration or sensitive window metadata.
-
