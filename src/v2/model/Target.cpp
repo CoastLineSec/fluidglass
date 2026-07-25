@@ -12,6 +12,8 @@ namespace hfg::v2 {
 namespace {
 
 constexpr double MAX_LOGICAL_VALUE = 1'000'000.0;
+constexpr double MAX_EASING_VALUE  = 16.0;
+constexpr double ENDPOINT_EPSILON  = 1e-9;
 
 Result<Target> invalid(std::string path, std::string message) {
     return Result<Target>::failure({
@@ -33,6 +35,109 @@ bool validIdentifier(std::string_view value) {
 
 bool finiteCoordinate(double value) {
     return std::isfinite(value) && std::abs(value) <= MAX_LOGICAL_VALUE;
+}
+
+std::optional<Error> validateTransition(const Transition& transition, std::string path) {
+    if (!validIdentifier(transition.id))
+        return Error{
+            ErrorCode::InvalidTarget,
+            path + ".id",
+            "expected a bounded transition identifier",
+        };
+    switch (transition.phase) {
+        case TransitionPhase::Enter:
+        case TransitionPhase::Exit:
+            break;
+        default:
+            return Error{
+                ErrorCode::InvalidTarget,
+                path + ".phase",
+                "expected enter or exit",
+            };
+    }
+    switch (transition.edge) {
+        case TransitionEdge::Top:
+        case TransitionEdge::Bottom:
+        case TransitionEdge::Left:
+        case TransitionEdge::Right:
+            break;
+        default:
+            return Error{
+                ErrorCode::InvalidTarget,
+                path + ".edge",
+                "expected top, bottom, left or right",
+            };
+    }
+    if (transition.durationMs == 0U || transition.durationMs > Limits::MAX_TRANSITION_MS)
+        return Error{
+            ErrorCode::InvalidTarget,
+            path + ".duration_ms",
+            "expected a duration within the supported millisecond limit",
+        };
+    if (transition.elapsedMs > transition.durationMs)
+        return Error{
+            ErrorCode::InvalidTarget,
+            path + ".elapsed_ms",
+            "elapsed time must not exceed duration",
+        };
+    if (!finiteCoordinate(transition.travel) || transition.travel < 0.0)
+        return Error{
+            ErrorCode::InvalidTarget,
+            path + ".travel",
+            "expected a finite non-negative logical distance",
+        };
+    if (transition.easing.size() > Limits::MAX_BEZIER_SEGMENTS)
+        return Error{
+            ErrorCode::ResourceLimited,
+            path + ".easing",
+            "transition exceeds the Bezier segment limit",
+        };
+
+    double previousEndX = 0.0;
+    for (std::size_t index = 0; index < transition.easing.size(); ++index) {
+        const auto& segment = transition.easing[index];
+        const auto segmentPath = path + ".easing[" + std::to_string(index) + "]";
+        for (const auto& [name, value] : {
+                 std::pair<std::string_view, double>{"control1_x", segment.control1X},
+                 {"control1_y", segment.control1Y},
+                 {"control2_x", segment.control2X},
+                 {"control2_y", segment.control2Y},
+                 {"end_x", segment.endX},
+                 {"end_y", segment.endY},
+             }) {
+            if (!std::isfinite(value) || std::abs(value) > MAX_EASING_VALUE)
+                return Error{
+                    ErrorCode::InvalidTarget,
+                    segmentPath + "." + std::string(name),
+                    "expected a finite bounded easing coordinate",
+                };
+        }
+        if (segment.endX <= previousEndX || segment.endX > 1.0)
+            return Error{
+                ErrorCode::InvalidTarget,
+                segmentPath + ".end_x",
+                "Bezier segment endpoints must advance through x in (0, 1]",
+            };
+        if (segment.control1X < previousEndX || segment.control1X > segment.endX ||
+            segment.control2X < previousEndX || segment.control2X > segment.endX)
+            return Error{
+                ErrorCode::InvalidTarget,
+                segmentPath,
+                "Bezier control-point x values must remain inside their segment",
+            };
+        previousEndX = segment.endX;
+    }
+    if (!transition.easing.empty()) {
+        const auto& endpoint = transition.easing.back();
+        if (std::abs(endpoint.endX - 1.0) > ENDPOINT_EPSILON ||
+            std::abs(endpoint.endY - 1.0) > ENDPOINT_EPSILON)
+            return Error{
+                ErrorCode::InvalidTarget,
+                path + ".easing",
+                "Bezier easing must end at (1, 1)",
+            };
+    }
+    return std::nullopt;
 }
 
 std::optional<Error> validateRect(const Rect& rect, std::string path) {
@@ -111,6 +216,19 @@ std::optional<Error> validateShape(const Shape& shape) {
                 if (value.parts[index].materialExtent)
                     if (auto error = validateRect(*value.parts[index].materialExtent, path + ".material_extent"))
                         return error;
+                if (value.parts[index].transition) {
+                    if (auto error = validateTransition(
+                            value.parts[index].transition->motion,
+                            path + ".transition"))
+                        return error;
+                    const double protrusion = value.parts[index].transition->protrusion;
+                    if (!finiteCoordinate(protrusion) || protrusion < 0.0)
+                        return Error{
+                            ErrorCode::InvalidTarget,
+                            path + ".transition.protrusion",
+                            "expected a finite non-negative logical distance",
+                        };
+                }
                 const double opacity = value.parts[index].opacity;
                 if (!std::isfinite(opacity) || opacity < 0.0 || opacity > 1.0)
                     return Error{ErrorCode::InvalidTarget, path + ".opacity", "expected a finite value from 0 to 1"};
@@ -154,6 +272,9 @@ Result<Target> validateTarget(TargetInput input) {
         return invalid("id", "expected 1-128 ASCII letters, digits, '.', '_' or '-' without the reserved _hfg_ prefix");
     if (!validIdentifier(input.material.name))
         return invalid("material.name", "invalid material name");
+    if (input.transition)
+        if (auto error = validateTransition(*input.transition, "transition"))
+            return Result<Target>::failure(std::move(*error));
     if (auto error = validateShape(input.shape))
         return Result<Target>::failure(std::move(*error));
 
@@ -215,6 +336,7 @@ Result<Target> validateTarget(TargetInput input) {
         .selector = std::move(input.selector),
         .geometry = std::move(input.geometry),
         .stage = input.stage,
+        .transition = std::move(input.transition),
         .enabled = input.enabled,
     });
 }

@@ -28,6 +28,18 @@ enum class RenderStage {
     PostLayer,
 };
 
+enum class TransitionPhase {
+    Enter,
+    Exit,
+};
+
+enum class TransitionEdge {
+    Top,
+    Bottom,
+    Left,
+    Right,
+};
+
 struct MaterialReference {
     MaterialSource source = MaterialSource::Session;
     std::string    name;
@@ -66,6 +78,36 @@ struct CornerRadii {
     friend bool operator==(const CornerRadii&, const CornerRadii&) = default;
 };
 
+struct CubicBezierSegment {
+    double control1X = 0.0;
+    double control1Y = 0.0;
+    double control2X = 0.0;
+    double control2Y = 0.0;
+    double endX      = 1.0;
+    double endY      = 1.0;
+
+    friend bool operator==(const CubicBezierSegment&, const CubicBezierSegment&) = default;
+};
+
+struct Transition {
+    std::string                     id;
+    TransitionPhase                 phase = TransitionPhase::Enter;
+    TransitionEdge                  edge = TransitionEdge::Top;
+    std::uint64_t                   durationMs = 0;
+    std::uint64_t                   elapsedMs = 0;
+    double                          travel = 0.0;
+    std::vector<CubicBezierSegment> easing;
+
+    friend bool operator==(const Transition&, const Transition&) = default;
+};
+
+struct PartTransition {
+    Transition motion;
+    double     protrusion = 0.0;
+
+    friend bool operator==(const PartTransition&, const PartTransition&) = default;
+};
+
 struct CompoundBase {
     CornerRadii corners;
 
@@ -84,6 +126,7 @@ struct CompoundPart {
     CornerRadii         corners;
     CornerRadii         junctions;
     std::optional<Rect> materialExtent;
+    std::optional<PartTransition> transition;
     double              opacity = 1.0;
 
     friend bool operator==(const CompoundPart&, const CompoundPart&) = default;
@@ -131,6 +174,7 @@ struct TargetInput {
     TargetSelector              selector = RegionSelector{};
     std::optional<Rect>         geometry;
     std::optional<RenderStage>  stage;
+    std::optional<Transition>   transition;
     bool                        enabled = true;
 };
 
@@ -142,6 +186,7 @@ struct Target {
     TargetSelector             selector;
     std::optional<Rect>        geometry;
     std::optional<RenderStage> stage;
+    std::optional<Transition>  transition;
     bool                       enabled = true;
 
     friend bool operator==(const Target&, const Target&) = default;

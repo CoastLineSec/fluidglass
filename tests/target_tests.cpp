@@ -20,6 +20,7 @@ TargetInput regionTarget() {
         .selector = RegionSelector{.output = "DP-1"},
         .geometry = Rect{.x = 10.0, .y = 20.0, .width = 400.0, .height = 300.0},
         .stage = RenderStage::PostWindows,
+        .transition = std::nullopt,
         .enabled = true,
     };
 }
@@ -28,6 +29,27 @@ CompoundPart simpleCompoundPart() {
     CompoundPart part;
     part.rect = Rect{.x = 0.0, .y = 0.0, .width = 100.0, .height = 30.0};
     return part;
+}
+
+Transition validTransition(std::string id = "motion-1") {
+    return {
+        .id = std::move(id),
+        .phase = TransitionPhase::Enter,
+        .edge = TransitionEdge::Bottom,
+        .durationMs = 240,
+        .elapsedMs = 40,
+        .travel = 44.0,
+        .easing = {
+            CubicBezierSegment{
+                .control1X = 0.2,
+                .control1Y = 0.0,
+                .control2X = 0.3,
+                .control2Y = 1.0,
+                .endX = 1.0,
+                .endY = 1.0,
+            },
+        },
+    };
 }
 
 } // namespace
@@ -52,6 +74,7 @@ int main() {
                 },
                 .geometry = std::nullopt,
                 .stage = std::nullopt,
+                .transition = std::nullopt,
             };
             const auto result = validateTarget(std::move(input));
             require(result.hasValue(), "valid window target was rejected");
@@ -71,6 +94,7 @@ int main() {
                 },
                 .geometry = std::nullopt,
                 .stage = std::nullopt,
+                .transition = std::nullopt,
             };
             require(!validateTarget(std::move(input)), "unguarded window address must fail");
         }},
@@ -88,6 +112,7 @@ int main() {
                 .selector = LayerSelector{.namespaceName = "example-shell:bar:primary"},
                 .geometry = std::nullopt,
                 .stage = std::nullopt,
+                .transition = std::nullopt,
             };
             require(validateTarget(input).hasValue(), "whole-surface layer target must be valid");
             input.geometry = Rect{.x = 0.0, .y = 0.0, .width = 1000.0, .height = 44.0};
@@ -152,6 +177,10 @@ int main() {
                     .bottomLeft = 0.0,
                 },
                 .materialExtent = Rect{.x = -8.0, .y = -8.0, .width = 196.0, .height = 64.0},
+                .transition = PartTransition{
+                    .motion = validTransition("part-open-1"),
+                    .protrusion = 48.0,
+                },
                 .opacity = 0.75,
             };
             expected.parts.push_back(part);
@@ -216,6 +245,79 @@ int main() {
             const auto result = validateTarget(input);
             require(!result, "over-limit connector list must fail");
             require(result.error().code == ErrorCode::ResourceLimited, "connector limit must report resource-limited");
+        }},
+        Case{"target transition", [] {
+            auto input = regionTarget();
+            const auto transition = validTransition();
+            input.transition = transition;
+
+            const auto result = validateTarget(input);
+            require(result.hasValue(), "valid target transition was rejected");
+            require(result.value().transition == transition, "target transition changed");
+        }},
+        Case{"transition identity and timing", [] {
+            auto input = regionTarget();
+            auto transition = validTransition();
+
+            transition.id = "";
+            input.transition = transition;
+            require(!validateTarget(input), "empty transition id must fail");
+
+            transition = validTransition();
+            transition.durationMs = 0;
+            input.transition = transition;
+            require(!validateTarget(input), "zero transition duration must fail");
+
+            transition = validTransition();
+            transition.durationMs = Limits::MAX_TRANSITION_MS + 1U;
+            input.transition = transition;
+            require(!validateTarget(input), "over-limit transition duration must fail");
+
+            transition = validTransition();
+            transition.elapsedMs = transition.durationMs + 1U;
+            input.transition = transition;
+            require(!validateTarget(input), "elapsed time beyond duration must fail");
+
+            transition = validTransition();
+            transition.edge = static_cast<TransitionEdge>(99);
+            input.transition = transition;
+            require(!validateTarget(input), "unknown transition edge must fail");
+        }},
+        Case{"transition easing is monotonic and bounded", [] {
+            auto input = regionTarget();
+            auto transition = validTransition();
+
+            transition.easing[0].control1X = -0.1;
+            input.transition = transition;
+            require(!validateTarget(input), "out-of-segment control point must fail");
+
+            transition = validTransition();
+            transition.easing[0].endX = 0.9;
+            input.transition = transition;
+            require(!validateTarget(input), "incomplete easing endpoint must fail");
+
+            transition = validTransition();
+            transition.easing.resize(Limits::MAX_BEZIER_SEGMENTS + 1U);
+            input.transition = transition;
+            const auto result = validateTarget(input);
+            require(!result, "over-limit easing must fail");
+            require(result.error().code == ErrorCode::ResourceLimited, "easing limit must report resource-limited");
+        }},
+        Case{"part transition protrusion is bounded", [] {
+            auto input = regionTarget();
+            CompoundShape shape;
+            auto part = simpleCompoundPart();
+            part.transition = PartTransition{
+                .motion = validTransition("part-motion"),
+                .protrusion = -1.0,
+            };
+            shape.parts.push_back(std::move(part));
+            input.shape = std::move(shape);
+
+            const auto result = validateTarget(input);
+            require(!result, "negative part protrusion must fail");
+            require(result.error().path == "shape.parts[0].transition.protrusion",
+                    "part protrusion failure path changed");
         }},
         Case{"region requires stage and geometry", [] {
             auto input = regionTarget();

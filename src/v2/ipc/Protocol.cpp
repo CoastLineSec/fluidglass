@@ -578,6 +578,7 @@ Result<Target> parseTarget(const json& object, std::size_t index) {
         .selector = RegionSelector{},
         .geometry = std::nullopt,
         .stage = std::nullopt,
+        .transition = std::nullopt,
         .enabled = true,
     };
     if (auto enabled = object.find("enabled"); enabled != object.end()) {
