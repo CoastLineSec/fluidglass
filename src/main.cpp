@@ -79,6 +79,7 @@ SP<SHyprCtlCommand> g_applyCommand;
 SP<SHyprCtlCommand> g_clearCommand;
 SP<SHyprCtlCommand> g_materialCommand;
 SP<SHyprCtlCommand> g_debugCommand;
+SP<SHyprCtlCommand> g_debugVerboseCommand;
 CHyprSignalListener g_renderStageListener;
 
 // ── P4 readiness contract (hgsglass event + per-descriptor readiness) ─────────
@@ -2899,9 +2900,9 @@ std::string setEnabled(bool on) {
     return std::string("hyprfluidglass: ") + (on ? "on" : "off") + "\n";
 }
 
-// Full diagnostic dump for tools/hyprfluidglass-debug: verbose per-element state +
-// the lifecycle event ring. Everything a bug report needs in one JSON blob.
-std::string debugJson() {
+// Diagnostic dump for tools/hyprfluidglass-debug. Surface selectors and event
+// details are redacted unless the caller explicitly uses the verbose command.
+std::string debugJson(bool includeIdentities) {
     json state;
     {
         std::lock_guard g(g_stateMutex);
@@ -2923,7 +2924,7 @@ std::string debugJson() {
             if (!el.bindType.empty()) {
                 e["bind"] = {
                     {"type", el.bindType},
-                    {"selector", el.bindSelector},
+                    {"selector", includeIdentities ? el.bindSelector : "<redacted>"},
                     {"relX", el.relX},
                     {"relY", el.relY},
                     {"bound", el.bound},
@@ -2975,7 +2976,13 @@ std::string debugJson() {
     {
         std::lock_guard g(g_dbgMutex);
         for (const auto& e : g_dbgEvents)
-            evs.push_back({{"seq", e.seq}, {"tMs", e.tMs}, {"id", e.id}, {"event", e.event}, {"info", e.info}});
+            evs.push_back({
+                {"seq", e.seq},
+                {"tMs", e.tMs},
+                {"id", e.id},
+                {"event", e.event},
+                {"info", includeIdentities || e.info.empty() ? e.info : "<redacted>"},
+            });
     }
     // error_handler replace: a single invalid byte in any logged string must
     // never take the whole instrument down (it renders as U+FFFD instead).
@@ -3257,7 +3264,8 @@ static std::chrono::milliseconds glassNextInterval() {
 std::string onStatus(eHyprCtlOutputFormat format, std::string) { return statusString(format); }
 std::string onApply(eHyprCtlOutputFormat, std::string req) { return applyPayload(removePrefix(std::move(req), "hyprfluidglass-apply-json")); }
 std::string onClear(eHyprCtlOutputFormat, std::string) { return clearElements(); }
-std::string onDebugJson(eHyprCtlOutputFormat, std::string) { return debugJson(); }
+std::string onDebugJson(eHyprCtlOutputFormat, std::string) { return debugJson(false); }
+std::string onDebugJsonVerbose(eHyprCtlOutputFormat, std::string) { return debugJson(true); }
 
 // Dispatcher twin of hyprfluidglass-apply-json: reachable over the Hyprland socket's
 // `dispatch` request, which clients can send WITHOUT spawning hyprctl (quickshell's
@@ -3306,6 +3314,8 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     g_materialCommand = HyprlandAPI::registerHyprCtlCommand(g_handle, mat);
     SHyprCtlCommand dbg;    dbg.name    = "hyprfluidglass-debug-json"; dbg.exact    = true;  dbg.fn    = onDebugJson;
     g_debugCommand = HyprlandAPI::registerHyprCtlCommand(g_handle, dbg);
+    SHyprCtlCommand dbgVerbose; dbgVerbose.name = "hyprfluidglass-debug-json-verbose"; dbgVerbose.exact = true; dbgVerbose.fn = onDebugJsonVerbose;
+    g_debugVerboseCommand = HyprlandAPI::registerHyprCtlCommand(g_handle, dbgVerbose);
     HyprlandAPI::addDispatcherV2(g_handle, "hyprfluidglass-apply", onApplyDispatch);
 
     if (g_pEventLoopManager) {
@@ -3365,12 +3375,13 @@ APICALL EXPORT void PLUGIN_EXIT() {
     if (g_quadVbo) { glDeleteBuffers(1, &g_quadVbo); g_quadVbo = 0; }
     if (g_quadVao) { glDeleteVertexArrays(1, &g_quadVao); g_quadVao = 0; }
     HyprlandAPI::removeDispatcher(g_handle, "hyprfluidglass-apply");
+    if (g_debugVerboseCommand) HyprlandAPI::unregisterHyprCtlCommand(g_handle, g_debugVerboseCommand);
     if (g_debugCommand)    HyprlandAPI::unregisterHyprCtlCommand(g_handle, g_debugCommand);
     if (g_materialCommand) HyprlandAPI::unregisterHyprCtlCommand(g_handle, g_materialCommand);
     if (g_clearCommand)    HyprlandAPI::unregisterHyprCtlCommand(g_handle, g_clearCommand);
     if (g_applyCommand)    HyprlandAPI::unregisterHyprCtlCommand(g_handle, g_applyCommand);
     if (g_statusCommand)   HyprlandAPI::unregisterHyprCtlCommand(g_handle, g_statusCommand);
-    g_debugCommand.reset(); g_materialCommand.reset(); g_clearCommand.reset(); g_applyCommand.reset(); g_statusCommand.reset();
+    g_debugVerboseCommand.reset(); g_debugCommand.reset(); g_materialCommand.reset(); g_clearCommand.reset(); g_applyCommand.reset(); g_statusCommand.reset();
     {
         std::lock_guard g(g_dbgMutex);
         g_dbgEvents.clear();
