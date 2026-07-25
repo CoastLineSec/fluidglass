@@ -180,9 +180,29 @@ The apron is clipped to the output buffer. Capture sizing uses checked
 arithmetic and is rejected before allocation if it exceeds reported resource
 limits.
 
-Targets sharing an output generation and render stage reuse compatible
-backdrop capture. A thin target does not require allocating or shading a
-full-output intermediate when bounded capture is sufficient.
+Capture compatibility is exact:
+
+```text
+output connector + output generation + render stage + render format + color state
+```
+
+Targets with compatible overlapping bounds share the smallest useful capture
+union. Distant targets remain separate when merging them would exceed the
+adapter's width, height, pixel, or byte limits. A thin target therefore does
+not require allocating or shading a full-output intermediate when bounded
+capture is sufficient.
+
+The renderer adapter reports bytes per pixel and allocation limits for the
+actual DRM format. The planner does not infer a memory layout from a fourcc or
+substitute a different format. Capture resources are framebuffer-tested before
+use and are indexed by the full compatibility key. Retiring an output
+generation returns every resource owned by that generation for immediate
+release.
+
+Compositor coverage uses a top-left origin. OpenGL framebuffer copies use a
+bottom-left origin. The bounded copy converts that y axis exactly once and
+copies into an equally sized texture with nearest sampling; it does not scale
+or color-convert the backdrop during capture.
 
 ## Damage
 
@@ -208,7 +228,7 @@ known color-space downgrade.
 
 Every render pass saves and restores the exact state it modifies, including:
 
-- framebuffer binding;
+- draw and read framebuffer bindings;
 - viewport;
 - scissor state and rectangle;
 - blend state and functions;
@@ -218,6 +238,14 @@ Every render pass saves and restores the exact state it modifies, including:
 
 The viewport is restored to its previous value, not reconstructed from the
 current monitor size.
+
+Hyprland internally caches viewport, capability, and shader selections.
+Restoration uses Hyprland's tracked renderer calls for those states. A pass
+that changes the shader begins only when the current program can be mapped to
+a tracked shader object and restored through the same API. A shader-neutral
+framebuffer copy leaves the active program untouched. The plugin does not use
+raw `glUseProgram`, `glViewport`, or capability toggles behind Hyprland's
+cache.
 
 ## Direct scanout
 
