@@ -47,6 +47,23 @@ std::optional<Error> validateRect(const Rect& rect, std::string path) {
     return std::nullopt;
 }
 
+std::optional<Error> validateCornerRadii(const CornerRadii& corners, std::string path) {
+    for (const auto& [name, value] : {
+             std::pair<std::string_view, double>{"top_left", corners.topLeft},
+             {"top_right", corners.topRight},
+             {"bottom_right", corners.bottomRight},
+             {"bottom_left", corners.bottomLeft},
+         }) {
+        if (!std::isfinite(value) || value < 0.0 || value > MAX_LOGICAL_VALUE)
+            return Error{
+                ErrorCode::InvalidTarget,
+                path + "." + std::string(name),
+                "expected a finite non-negative radius",
+            };
+    }
+    return std::nullopt;
+}
+
 std::optional<Error> validateShape(const Shape& shape) {
     return std::visit([](const auto& value) -> std::optional<Error> {
         using T = std::decay_t<decltype(value)>;
@@ -59,18 +76,50 @@ std::optional<Error> validateShape(const Shape& shape) {
             if (!std::isfinite(value.thickness) || value.thickness <= 0.0 || value.thickness > MAX_LOGICAL_VALUE)
                 return Error{ErrorCode::InvalidTarget, "shape.thickness", "expected a finite positive thickness"};
         } else if constexpr (std::is_same_v<T, CompoundShape>) {
-            if (value.parts.empty())
-                return Error{ErrorCode::InvalidTarget, "shape.parts", "compound shape must contain at least one part"};
+            if (!value.base && value.parts.empty())
+                return Error{ErrorCode::InvalidTarget, "shape", "compound shape requires a base or at least one part"};
+            if (value.cutout && !value.base)
+                return Error{ErrorCode::InvalidTarget, "shape.cutout", "compound cutout requires a base"};
             if (value.parts.size() > Limits::MAX_COMPOUND_PARTS)
                 return Error{ErrorCode::ResourceLimited, "shape.parts", "compound shape exceeds the part limit"};
+            if (value.connectors.size() > Limits::MAX_COMPOUND_CONNECTORS)
+                return Error{ErrorCode::ResourceLimited, "shape.connectors", "compound shape exceeds the connector limit"};
+            if (!std::isfinite(value.connectorCurve) || value.connectorCurve < 0.0 ||
+                value.connectorCurve > MAX_LOGICAL_VALUE)
+                return Error{
+                    ErrorCode::InvalidTarget,
+                    "shape.connector_curve",
+                    "expected a finite non-negative connector curve",
+                };
+            if (value.base)
+                if (auto error = validateCornerRadii(value.base->corners, "shape.base.corner_radii"))
+                    return error;
+            if (value.cutout) {
+                if (auto error = validateRect(value.cutout->rect, "shape.cutout.rect"))
+                    return error;
+                if (auto error = validateCornerRadii(value.cutout->corners, "shape.cutout.corner_radii"))
+                    return error;
+            }
             for (std::size_t index = 0; index < value.parts.size(); ++index) {
                 const auto path = "shape.parts[" + std::to_string(index) + "]";
                 if (auto error = validateRect(value.parts[index].rect, path + ".rect"))
                     return error;
-                const double radius = value.parts[index].radius;
-                if (!std::isfinite(radius) || radius < 0.0 || radius > MAX_LOGICAL_VALUE)
-                    return Error{ErrorCode::InvalidTarget, path + ".radius", "expected a finite non-negative radius"};
+                if (auto error = validateCornerRadii(value.parts[index].corners, path + ".corner_radii"))
+                    return error;
+                if (auto error = validateCornerRadii(value.parts[index].junctions, path + ".junctions"))
+                    return error;
+                if (value.parts[index].materialExtent)
+                    if (auto error = validateRect(*value.parts[index].materialExtent, path + ".material_extent"))
+                        return error;
+                const double opacity = value.parts[index].opacity;
+                if (!std::isfinite(opacity) || opacity < 0.0 || opacity > 1.0)
+                    return Error{ErrorCode::InvalidTarget, path + ".opacity", "expected a finite value from 0 to 1"};
             }
+            for (std::size_t index = 0; index < value.connectors.size(); ++index)
+                if (auto error = validateRect(
+                        value.connectors[index],
+                        "shape.connectors[" + std::to_string(index) + "]"))
+                    return error;
         }
         return std::nullopt;
     }, shape);

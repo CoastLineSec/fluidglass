@@ -79,7 +79,7 @@ json shapeJson(const Shape& shape) {
                     {"y", part.rect.y},
                     {"width", part.rect.width},
                     {"height", part.rect.height},
-                    {"radius", part.radius},
+                    {"radius", part.corners.topLeft},
                 });
             }
             return {

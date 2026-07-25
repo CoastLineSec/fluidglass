@@ -309,12 +309,13 @@ Result<Shape> parseShape(const json& object, std::string path) {
             if (auto error = rejectUnknown(part, partFields, partPath, ErrorCode::InvalidTarget))
                 return Result<Shape>::failure(std::move(*error));
             CompoundPart parsed;
+            double       radius = 0.0;
             for (const auto& [key, destination] : {
                      std::pair<std::string_view, double*>{"x", &parsed.rect.x},
                      {"y", &parsed.rect.y},
                      {"width", &parsed.rect.width},
                      {"height", &parsed.rect.height},
-                     {"radius", &parsed.radius},
+                     {"radius", &radius},
                  }) {
                 const auto value = part.find(key);
                 if (value == part.end() || !value->is_number())
@@ -323,6 +324,7 @@ Result<Shape> parseShape(const json& object, std::string path) {
                 if (!std::isfinite(*destination))
                     return invalid<Shape>(ErrorCode::InvalidTarget, partPath + "." + std::string(key), "expected a finite number");
             }
+            parsed.corners = {radius, radius, radius, radius};
             shape.parts.push_back(parsed);
         }
         return Result<Shape>::success(std::move(shape));

@@ -57,15 +57,44 @@ struct RingShape {
     friend bool operator==(const RingShape&, const RingShape&) = default;
 };
 
+struct CornerRadii {
+    double topLeft     = 0.0;
+    double topRight    = 0.0;
+    double bottomRight = 0.0;
+    double bottomLeft  = 0.0;
+
+    friend bool operator==(const CornerRadii&, const CornerRadii&) = default;
+};
+
+struct CompoundBase {
+    CornerRadii corners;
+
+    friend bool operator==(const CompoundBase&, const CompoundBase&) = default;
+};
+
+struct CompoundCutout {
+    Rect        rect;
+    CornerRadii corners;
+
+    friend bool operator==(const CompoundCutout&, const CompoundCutout&) = default;
+};
+
 struct CompoundPart {
-    Rect   rect;
-    double radius = 0.0;
+    Rect                rect;
+    CornerRadii         corners;
+    CornerRadii         junctions;
+    std::optional<Rect> materialExtent;
+    double              opacity = 1.0;
 
     friend bool operator==(const CompoundPart&, const CompoundPart&) = default;
 };
 
 struct CompoundShape {
-    std::vector<CompoundPart> parts;
+    std::optional<CompoundBase>   base;
+    std::optional<CompoundCutout> cutout;
+    std::vector<CompoundPart>     parts;
+    std::vector<Rect>             connectors;
+    double                        connectorCurve = 0.0;
 
     friend bool operator==(const CompoundShape&, const CompoundShape&) = default;
 };

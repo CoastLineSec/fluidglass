@@ -24,6 +24,12 @@ TargetInput regionTarget() {
     };
 }
 
+CompoundPart simpleCompoundPart() {
+    CompoundPart part;
+    part.rect = Rect{.x = 0.0, .y = 0.0, .width = 100.0, .height = 30.0};
+    return part;
+}
+
 } // namespace
 
 int main() {
@@ -110,6 +116,106 @@ int main() {
             const auto result = validateTarget(input);
             require(!result, "over-limit compound must fail");
             require(result.error().code == ErrorCode::ResourceLimited, "part limit must report resource-limited");
+        }},
+        Case{"compound assembly", [] {
+            auto input = regionTarget();
+            CompoundShape expected;
+            expected.base = CompoundBase{
+                .corners = CornerRadii{
+                    .topLeft = 24.0,
+                    .topRight = 24.0,
+                    .bottomRight = 20.0,
+                    .bottomLeft = 20.0,
+                },
+            };
+            expected.cutout = CompoundCutout{
+                .rect = Rect{.x = 40.0, .y = 30.0, .width = 120.0, .height = 80.0},
+                .corners = CornerRadii{
+                    .topLeft = 18.0,
+                    .topRight = 18.0,
+                    .bottomRight = 14.0,
+                    .bottomLeft = 14.0,
+                },
+            };
+            CompoundPart part{
+                .rect = Rect{.x = 0.0, .y = 0.0, .width = 180.0, .height = 48.0},
+                .corners = CornerRadii{
+                    .topLeft = 18.0,
+                    .topRight = 18.0,
+                    .bottomRight = 8.0,
+                    .bottomLeft = 8.0,
+                },
+                .junctions = CornerRadii{
+                    .topLeft = 0.0,
+                    .topRight = 6.0,
+                    .bottomRight = 6.0,
+                    .bottomLeft = 0.0,
+                },
+                .materialExtent = Rect{.x = -8.0, .y = -8.0, .width = 196.0, .height = 64.0},
+                .opacity = 0.75,
+            };
+            expected.parts.push_back(part);
+            expected.connectors.push_back(Rect{.x = 176.0, .y = 18.0, .width = 12.0, .height = 12.0});
+            expected.connectorCurve = 7.0;
+            input.shape = expected;
+
+            const auto result = validateTarget(input);
+            require(result.hasValue(), "valid compound assembly was rejected");
+            require(std::get<CompoundShape>(result.value().shape) == expected, "compound assembly changed");
+        }},
+        Case{"compound cutout requires base", [] {
+            auto input = regionTarget();
+            CompoundShape shape;
+            shape.cutout = CompoundCutout{
+                .rect = Rect{.x = 10.0, .y = 10.0, .width = 40.0, .height = 40.0},
+                .corners = {},
+            };
+            shape.parts.push_back(simpleCompoundPart());
+            input.shape = std::move(shape);
+
+            const auto result = validateTarget(input);
+            require(!result, "compound cutout without a base must fail");
+            require(result.error().path == "shape.cutout", "cutout failure path changed");
+        }},
+        Case{"compound fields are bounded", [] {
+            auto input = regionTarget();
+            CompoundShape shape;
+            shape.parts.push_back(simpleCompoundPart());
+
+            shape.parts[0].corners.topLeft = -1.0;
+            input.shape = shape;
+            require(!validateTarget(input), "negative corner radius must fail");
+
+            shape.parts[0].corners.topLeft = 0.0;
+            shape.parts[0].junctions.bottomRight = std::numeric_limits<double>::infinity();
+            input.shape = shape;
+            require(!validateTarget(input), "infinite junction radius must fail");
+
+            shape.parts[0].junctions.bottomRight = 0.0;
+            shape.parts[0].materialExtent = Rect{.x = 0.0, .y = 0.0, .width = 0.0, .height = 20.0};
+            input.shape = shape;
+            require(!validateTarget(input), "empty material extent must fail");
+
+            shape.parts[0].materialExtent = std::nullopt;
+            shape.parts[0].opacity = 1.01;
+            input.shape = shape;
+            require(!validateTarget(input), "opacity above one must fail");
+
+            shape.parts[0].opacity = 1.0;
+            shape.connectorCurve = -1.0;
+            input.shape = shape;
+            require(!validateTarget(input), "negative connector curve must fail");
+        }},
+        Case{"compound connector limit", [] {
+            auto input = regionTarget();
+            CompoundShape shape;
+            shape.parts.push_back(simpleCompoundPart());
+            shape.connectors.resize(Limits::MAX_COMPOUND_CONNECTORS + 1U);
+            input.shape = std::move(shape);
+
+            const auto result = validateTarget(input);
+            require(!result, "over-limit connector list must fail");
+            require(result.error().code == ErrorCode::ResourceLimited, "connector limit must report resource-limited");
         }},
         Case{"region requires stage and geometry", [] {
             auto input = regionTarget();
