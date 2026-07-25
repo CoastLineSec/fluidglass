@@ -35,6 +35,14 @@ struct ResolvedPresentation {
     friend bool operator==(const ResolvedPresentation&, const ResolvedPresentation&) = default;
 };
 
+struct ResolvedTarget {
+    Target             definition;
+    ResolvedAttachment attachment;
+    double             roundingPower = 2.0;
+
+    friend bool operator==(const ResolvedTarget&, const ResolvedTarget&) = default;
+};
+
 [[nodiscard]] Result<std::vector<ResolvedPresentation>> resolvePresentations(
     const ResolvedAttachment& attachment,
     std::span<const OutputGeneration> outputs);
