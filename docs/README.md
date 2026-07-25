@@ -16,6 +16,7 @@ development builds. The renderer contract is published so shell and
 integration authors can prepare against the same versioned interface:
 
 - [Architecture](architecture/v2-overview.md)
+- [Target resolution](architecture/target-resolution.md)
 - [Rendering and geometry](architecture/rendering-contract.md)
 - [Lua configuration](reference/lua-configuration.md)
 - [Runtime protocol](reference/runtime-protocol.md)

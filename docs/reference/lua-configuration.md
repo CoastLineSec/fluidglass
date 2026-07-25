@@ -248,7 +248,8 @@ rule are combined with logical AND.
 
 Window rules create generic under-window glass attachments. They do not alter
 GTK or application themes. An application must expose transparent regions for
-the glass to be visible.
+the glass to be visible. The attachment follows the matched window's live
+compositor geometry, opacity, corner radius, and corner power.
 
 ## Layer rules
 
@@ -272,7 +273,9 @@ the glass to be visible.
 
 The plugin treats the namespace as an opaque client-controlled identifier. It
 does not grant special behavior to `hgs:`, `quickshell:`, `ags:`, or any other
-prefix.
+prefix. A durable layer rule covers the complete matched surface with a
+rectangular shape. Use a leased runtime target when a shell needs an explicit
+rounded, ring, compound, or partial-surface shape.
 
 ## Rule precedence
 
@@ -286,7 +289,8 @@ Durable rules are evaluated in array order:
    and expires with its lease.
 
 Configuration authorities remain separate. A runtime replacement cannot delete
-or mutate a durable rule.
+or mutate a durable rule. Equal-precedence targets that select the same exact
+attachment fail closed instead of selecting an arbitrary winner.
 
 ## Return and errors
 
