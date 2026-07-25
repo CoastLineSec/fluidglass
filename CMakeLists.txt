@@ -68,7 +68,12 @@ target_include_directories(hyprfluidglass-v2-core PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
     "${HYPRFLUIDGLASS_JSON_INCLUDE}"
 )
-target_compile_options(hyprfluidglass-v2-core PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(hyprfluidglass-v2-core PRIVATE
+    -Wall
+    -Wextra
+    -Wpedantic
+    $<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang>:-fno-gnu-unique>
+)
 
 include(CTest)
 if(BUILD_TESTING)
