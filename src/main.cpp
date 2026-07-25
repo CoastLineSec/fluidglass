@@ -47,7 +47,9 @@
 #include <hyprland/src/protocols/XDGShell.hpp>
 
 #include <nlohmann/json.hpp>
+#include <lua.hpp>
 
+#include "v2/config/LuaConfig.hpp"
 #include "v2/core/OpaqueId.hpp"
 #include "v2/runtime/Runtime.hpp"
 
@@ -88,7 +90,10 @@ SP<SHyprCtlCommand> g_debugCommand;
 SP<SHyprCtlCommand> g_debugVerboseCommand;
 SP<SHyprCtlCommand> g_v2Command;
 CHyprSignalListener g_renderStageListener;
+CHyprSignalListener g_v2ConfigPreReloadListener;
+CHyprSignalListener g_v2ConfigReloadedListener;
 std::unique_ptr<hfg::v2::RuntimeService> g_v2Runtime;
+bool                g_v2LuaFunctionRegistered = false;
 
 // ── P4 readiness contract (hgsglass event + per-descriptor readiness) ─────────
 // The shell proves, per descriptor and per REVISION, that HyprFluidGlass accepted
@@ -3461,6 +3466,62 @@ std::string onV2(eHyprCtlOutputFormat, std::string req) {
     }
 }
 
+int onV2LuaConfigure(lua_State* state) {
+    bool failed = false;
+    {
+        std::string message;
+        try {
+            if (!g_v2Runtime) {
+                message = "hyprfluidglass runtime is unavailable";
+            } else if (lua_gettop(state) != 1 || lua_type(state, 1) != LUA_TTABLE) {
+                message = "configure expects exactly one configuration table";
+            } else {
+                auto parsed = hfg::v2::parseLuaConfig(state, 1);
+                if (!parsed) {
+                    const auto& error = parsed.error();
+                    message = error.path.empty() ? error.message : error.path + ": " + error.message;
+                } else {
+                    auto staged = g_v2Runtime->configStore().stage(std::move(parsed.value()));
+                    if (!staged) {
+                        const auto& error = staged.error();
+                        message = error.path.empty() ? error.message : error.path + ": " + error.message;
+                    }
+                }
+            }
+        } catch (...) {
+            message = "internal hyprfluidglass configuration failure";
+        }
+
+        if (!message.empty()) {
+            lua_pushlstring(state, message.data(), message.size());
+            failed = true;
+        }
+    }
+
+    if (failed)
+        return lua_error(state);
+    lua_pushboolean(state, 1);
+    return 1;
+}
+
+void onV2ConfigPreReload() noexcept {
+    try {
+        if (g_v2Runtime)
+            g_v2Runtime->configStore().beginReload();
+    } catch (...) {
+    }
+}
+
+void onV2ConfigReloaded() noexcept {
+    try {
+        if (g_v2Runtime) {
+            const auto committed = g_v2Runtime->configStore().commitReload();
+            static_cast<void>(committed);
+        }
+    } catch (...) {
+    }
+}
+
 // Dispatcher twin of hyprfluidglass-apply-json: reachable over the Hyprland socket's
 // `dispatch` request, which clients can send WITHOUT spawning hyprctl (quickshell's
 // Hyprland.dispatch). That drops per-update transport cost from a fork+exec to a
@@ -3524,6 +3585,17 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     g_v2Command = HyprlandAPI::registerHyprCtlCommand(g_handle, v2);
     HyprlandAPI::addDispatcherV2(g_handle, "hyprfluidglass-apply", onApplyDispatch);
 
+    if (Event::bus()) {
+        g_v2LuaFunctionRegistered =
+            HyprlandAPI::addLuaFunction(g_handle, "hyprfluidglass", "configure", onV2LuaConfigure);
+        if (g_v2LuaFunctionRegistered) {
+            g_v2ConfigPreReloadListener =
+                Event::bus()->m_events.config.preReload.listen(onV2ConfigPreReload);
+            g_v2ConfigReloadedListener =
+                Event::bus()->m_events.config.reloaded.listen(onV2ConfigReloaded);
+        }
+    }
+
     if (g_pEventLoopManager) {
         // P4: hgsglass readiness/health timer — coalesced change events + ~1s
         // heartbeat while descriptors are active; self-re-arms at a variable cadence.
@@ -3558,6 +3630,11 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
+    g_v2ConfigReloadedListener.reset();
+    g_v2ConfigPreReloadListener.reset();
+    if (g_v2LuaFunctionRegistered)
+        HyprlandAPI::removeLuaFunction(g_handle, "hyprfluidglass", "configure");
+    g_v2LuaFunctionRegistered = false;
     g_renderStageListener.reset();
     // P4: farewell event so the shell learns of an orderly teardown immediately
     // (its strict readiness must drop; visual recovery must not await the poll).
