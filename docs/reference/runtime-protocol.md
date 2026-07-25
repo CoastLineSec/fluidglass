@@ -36,7 +36,9 @@ Every request contains:
 | `request_id` | string | no | Opaque client correlation id |
 
 Unknown request fields are rejected unless the operation explicitly declares
-them. The complete request body is limited to 256 KiB.
+them. Duplicate object fields are rejected instead of allowing one value to
+silently replace another. The complete request body is limited to 256 KiB and
+JSON nesting is limited to 64 levels.
 
 ## Response envelope
 
@@ -102,6 +104,7 @@ Response fields include:
     ],
     "limits": {
       "request_bytes": 262144,
+      "json_nesting": 64,
       "identifier_bytes": 128,
       "regex_bytes": 256,
       "sessions": 64,
