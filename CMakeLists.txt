@@ -74,6 +74,7 @@ add_library(hyprfluidglass-v2-core STATIC
     src/v2/render/CaptureBlit.cpp
     src/v2/render/CaptureCache.cpp
     src/v2/render/CapturePlan.cpp
+    src/v2/render/CaptureScene.cpp
     src/v2/render/Geometry.cpp
     src/v2/render/MaterialSampling.cpp
     src/v2/render/OutputGeneration.cpp
@@ -200,6 +201,12 @@ if(BUILD_TESTING)
     target_link_libraries(hyprfluidglass-capture-plan-tests PRIVATE hyprfluidglass-v2-core)
     target_compile_options(hyprfluidglass-capture-plan-tests PRIVATE -Wall -Wextra -Wpedantic)
     add_test(NAME hyprfluidglass-capture-plan COMMAND hyprfluidglass-capture-plan-tests)
+
+    add_executable(hyprfluidglass-capture-scene-tests tests/capture_scene_tests.cpp)
+    target_include_directories(hyprfluidglass-capture-scene-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+    target_link_libraries(hyprfluidglass-capture-scene-tests PRIVATE hyprfluidglass-v2-core)
+    target_compile_options(hyprfluidglass-capture-scene-tests PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME hyprfluidglass-capture-scene COMMAND hyprfluidglass-capture-scene-tests)
 
     add_executable(hyprfluidglass-capture-cache-tests tests/capture_cache_tests.cpp)
     target_include_directories(hyprfluidglass-capture-cache-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests")
