@@ -3554,8 +3554,10 @@ APICALL EXPORT void PLUGIN_EXIT() {
         g_lastRenderStatus = "disabled";
     }
     g_captureFBs.clear();
+    g_captureKnownSize.clear();
     g_elemFBs.clear();
     g_selfDamage.clear();
+    g_preWindowDrawn.clear();
     g_shader.reset();
     g_blurShader.reset();
     g_blurCompiled   = false;
