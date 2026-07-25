@@ -15,6 +15,7 @@ class RuntimeService {
     explicit RuntimeService(SessionManager::OpaqueIdFactory opaqueIdFactory);
 
     [[nodiscard]] std::string handle(std::string_view payload, std::uint64_t nowMs) noexcept;
+    void tick(std::uint64_t nowMs) noexcept;
 
     [[nodiscard]] ConfigStore& configStore() noexcept;
     [[nodiscard]] const ConfigStore& configStore() const noexcept;

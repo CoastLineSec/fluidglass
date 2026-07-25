@@ -326,7 +326,11 @@ int main() {
             const auto opened = open(fixture.runtime, "shell", 0);
             const auto sessionId = opened["result"]["session_id"].get<std::string>();
             const auto token = opened["result"]["token"].get<std::string>();
-            require(call(fixture.runtime, replacement(sessionId, token, 1), 0)["ok"] == true,
+            const auto replaced = call(
+                fixture.runtime,
+                replacement(sessionId, token, 1),
+                0);
+            require(replaced["ok"] == true,
                     "session replacement failed");
 
             const auto status = call(
@@ -335,6 +339,27 @@ int main() {
                 Limits::CLIENT_LEASE_MS);
             require(status["result"]["totals"]["sessions"] == 0, "expired session remained live");
             require(status["result"]["readiness"].empty(), "expired target readiness remained live");
+        }},
+        Case{"render-loop tick expires idle sessions without IPC", [] {
+            Fixture fixture;
+            const auto opened = open(fixture.runtime, "shell", 0);
+            const auto sessionId = opened["result"]["session_id"].get<std::string>();
+            const auto token = opened["result"]["token"].get<std::string>();
+            const auto replaced = call(
+                fixture.runtime,
+                replacement(sessionId, token, 1),
+                0);
+            require(replaced["ok"] == true,
+                    "session replacement failed");
+
+            fixture.runtime.tick(Limits::CLIENT_LEASE_MS);
+            require(fixture.runtime.sessionManager().sessionCount() == 0U,
+                    "idle session survived its render-loop tick");
+            require(!fixture.runtime.readinessTracker().target({
+                        .owner = replaced["result"]["owner"].get<std::string>(),
+                        .targetId = "bar",
+                    }),
+                    "idle session readiness survived expiry");
         }},
         Case{"malformed requests return protocol failures", [] {
             Fixture fixture;

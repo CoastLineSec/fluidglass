@@ -480,7 +480,7 @@ RuntimeService::RuntimeService(SessionManager::OpaqueIdFactory opaqueIdFactory)
 
 std::string RuntimeService::handle(std::string_view payload, std::uint64_t nowMs) noexcept {
     try {
-        expireSessions(nowMs);
+        tick(nowMs);
         auto request = parseRequest(payload);
         if (!request)
             return failureResponse(std::nullopt, request.error());
@@ -490,6 +490,13 @@ std::string RuntimeService::handle(std::string_view payload, std::uint64_t nowMs
         return successResponse(request.value().requestId, result.value());
     } catch (...) {
         return std::string(INTERNAL_FAILURE);
+    }
+}
+
+void RuntimeService::tick(std::uint64_t nowMs) noexcept {
+    try {
+        expireSessions(nowMs);
+    } catch (...) {
     }
 }
 
