@@ -48,6 +48,9 @@
 
 #include <nlohmann/json.hpp>
 
+#include "v2/core/OpaqueId.hpp"
+#include "v2/runtime/Runtime.hpp"
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -57,6 +60,7 @@
 #include <exception>
 #include <format>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <regex>
 #include <set>
@@ -82,7 +86,9 @@ SP<SHyprCtlCommand> g_clearCommand;
 SP<SHyprCtlCommand> g_materialCommand;
 SP<SHyprCtlCommand> g_debugCommand;
 SP<SHyprCtlCommand> g_debugVerboseCommand;
+SP<SHyprCtlCommand> g_v2Command;
 CHyprSignalListener g_renderStageListener;
+std::unique_ptr<hfg::v2::RuntimeService> g_v2Runtime;
 
 // ── P4 readiness contract (hgsglass event + per-descriptor readiness) ─────────
 // The shell proves, per descriptor and per REVISION, that HyprFluidGlass accepted
@@ -3439,6 +3445,22 @@ std::string onDebugJsonVerbose(eHyprCtlOutputFormat, std::string) {
     });
 }
 
+std::string onV2(eHyprCtlOutputFormat, std::string req) {
+    static constexpr std::string_view UNAVAILABLE =
+        R"({"ok":false,"version":2,"error":{"code":"internal-error","path":"","message":"runtime is unavailable"}})";
+    try {
+        if (!g_v2Runtime)
+            return std::string(UNAVAILABLE);
+        const auto nowMs = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count());
+        return g_v2Runtime->handle(
+            removePrefix(std::move(req), "hyprfluidglass"),
+            nowMs);
+    } catch (...) {
+        return std::string(UNAVAILABLE);
+    }
+}
+
 // Dispatcher twin of hyprfluidglass-apply-json: reachable over the Hyprland socket's
 // `dispatch` request, which clients can send WITHOUT spawning hyprctl (quickshell's
 // Hyprland.dispatch). That drops per-update transport cost from a fork+exec to a
@@ -3475,6 +3497,7 @@ APICALL EXPORT std::string PLUGIN_API_VERSION() { return HYPRLAND_API_VERSION; }
 
 APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     g_handle = handle;
+    g_v2Runtime = std::make_unique<hfg::v2::RuntimeService>(hfg::v2::secureOpaqueId);
 
     // P4: unique-per-load generation nonce (steady-clock ms — kept within JS's
     // safe-integer range so the shell compares it exactly). The shell keys reload
@@ -3495,6 +3518,10 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     g_debugCommand = HyprlandAPI::registerHyprCtlCommand(g_handle, dbg);
     SHyprCtlCommand dbgVerbose; dbgVerbose.name = "hyprfluidglass-debug-json-verbose"; dbgVerbose.exact = true; dbgVerbose.fn = onDebugJsonVerbose;
     g_debugVerboseCommand = HyprlandAPI::registerHyprCtlCommand(g_handle, dbgVerbose);
+    // HyprCtl checks non-exact commands in registration order. Keep this generic
+    // prefix after the compatibility commands so their longer names retain priority.
+    SHyprCtlCommand v2; v2.name = "hyprfluidglass"; v2.exact = false; v2.fn = onV2;
+    g_v2Command = HyprlandAPI::registerHyprCtlCommand(g_handle, v2);
     HyprlandAPI::addDispatcherV2(g_handle, "hyprfluidglass-apply", onApplyDispatch);
 
     if (g_pEventLoopManager) {
@@ -3566,13 +3593,15 @@ APICALL EXPORT void PLUGIN_EXIT() {
     if (g_quadVbo) { glDeleteBuffers(1, &g_quadVbo); g_quadVbo = 0; }
     if (g_quadVao) { glDeleteVertexArrays(1, &g_quadVao); g_quadVao = 0; }
     HyprlandAPI::removeDispatcher(g_handle, "hyprfluidglass-apply");
+    if (g_v2Command)       HyprlandAPI::unregisterHyprCtlCommand(g_handle, g_v2Command);
     if (g_debugVerboseCommand) HyprlandAPI::unregisterHyprCtlCommand(g_handle, g_debugVerboseCommand);
     if (g_debugCommand)    HyprlandAPI::unregisterHyprCtlCommand(g_handle, g_debugCommand);
     if (g_materialCommand) HyprlandAPI::unregisterHyprCtlCommand(g_handle, g_materialCommand);
     if (g_clearCommand)    HyprlandAPI::unregisterHyprCtlCommand(g_handle, g_clearCommand);
     if (g_applyCommand)    HyprlandAPI::unregisterHyprCtlCommand(g_handle, g_applyCommand);
     if (g_statusCommand)   HyprlandAPI::unregisterHyprCtlCommand(g_handle, g_statusCommand);
-    g_debugVerboseCommand.reset(); g_debugCommand.reset(); g_materialCommand.reset(); g_clearCommand.reset(); g_applyCommand.reset(); g_statusCommand.reset();
+    g_v2Command.reset(); g_debugVerboseCommand.reset(); g_debugCommand.reset(); g_materialCommand.reset(); g_clearCommand.reset(); g_applyCommand.reset(); g_statusCommand.reset();
+    g_v2Runtime.reset();
     {
         std::lock_guard g(g_dbgMutex);
         g_dbgEvents.clear();

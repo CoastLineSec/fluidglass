@@ -74,6 +74,7 @@ target_compile_options(hyprfluidglass-v2-core PRIVATE
     -Wpedantic
     $<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang>:-fno-gnu-unique>
 )
+target_link_libraries(hyprfluidglass PRIVATE hyprfluidglass-v2-core)
 
 include(CTest)
 if(BUILD_TESTING)
