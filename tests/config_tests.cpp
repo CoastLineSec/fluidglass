@@ -143,6 +143,13 @@ int main() {
             require(!store.commitReload(), "empty reload unexpectedly committed");
             require(store.active() && store.active()->defaultMaterial == "fluid",
                     "empty reload cleared active state");
+            require(store.pendingError().has_value(), "empty reload failure was not retained");
+            require(store.pendingError()->path == "config", "empty reload error path changed");
+
+            store.beginReload();
+            require(store.stage(validConfig()).hasValue(), "recovery configuration did not stage");
+            require(store.commitReload().hasValue(), "recovery configuration did not commit");
+            require(!store.pendingError().has_value(), "successful reload did not clear the error");
         }},
         Case{"later configure call replaces staging snapshot", [] {
             ConfigStore store;

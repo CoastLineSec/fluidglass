@@ -216,6 +216,14 @@ json statusJson(
         readinessJson[std::string(state)] = count;
 
     const auto* active = config.active();
+    json reloadError = nullptr;
+    if (const auto& error = config.pendingError())
+        reloadError = {
+            {"code", errorCodeName(error->code)},
+            {"path", error->path},
+            {"message", error->message},
+        };
+
     return {
         {"renderer", "inactive"},
         {"config", {
@@ -225,6 +233,7 @@ json statusJson(
             {"materials", active ? active->materials.size() : 0U},
             {"window_rules", active ? active->windowRules.size() : 0U},
             {"layer_rules", active ? active->layerRules.size() : 0U},
+            {"last_reload_error", std::move(reloadError)},
         }},
         {"sessions", std::move(sessionList)},
         {"totals", {

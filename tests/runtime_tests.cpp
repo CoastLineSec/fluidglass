@@ -156,6 +156,36 @@ int main() {
                 replacement(sessionId, token, 1, "config", "global"))["ok"] == true,
                 "active config material was rejected");
         }},
+        Case{"status reports a failed config reload without losing active state", [] {
+            Fixture fixture;
+            ConfigSnapshotInput config{
+                .version = 2,
+                .enabled = true,
+                .defaultMaterial = "global",
+                .materials = {{"global", {}}},
+                .windowRules = {},
+                .layerRules = {},
+            };
+            fixture.runtime.configStore().beginReload();
+            require(fixture.runtime.configStore().stage(std::move(config)).hasValue(),
+                    "config staging failed");
+            require(fixture.runtime.configStore().commitReload().hasValue(),
+                    "config commit failed");
+
+            fixture.runtime.configStore().beginReload();
+            require(!fixture.runtime.configStore().commitReload(),
+                    "empty config reload unexpectedly committed");
+
+            const auto status = call(fixture.runtime, R"({"version":2,"operation":"status"})");
+            require(status["result"]["config"]["active"] == true,
+                    "failed reload removed the active config");
+            require(status["result"]["config"]["generation"] == 1,
+                    "failed reload changed the config generation");
+            require(status["result"]["config"]["last_reload_error"]["code"] == "invalid-request",
+                    "status omitted the config reload error");
+            require(status["result"]["config"]["last_reload_error"]["path"] == "config",
+                    "status changed the config reload error path");
+        }},
         Case{"failed replacement preserves live state and readiness", [] {
             Fixture fixture;
             const auto opened = open(fixture.runtime);
