@@ -113,6 +113,9 @@ hl.plugin.hyprfluidglass.configure({
 Unknown top-level fields are rejected. A missing required field invalidates the
 pending snapshot.
 
+One snapshot may contain up to 128 materials, 512 window rules, and 512 layer
+rules. Identifiers are limited to 128 bytes and match expressions to 256 bytes.
+
 ## Reload transaction
 
 Configuration reloads are fail-safe:
