@@ -7,10 +7,3 @@
 .DS_Store
 .cache/
 compile_commands.json
-
-# Agent/working notes stay local
-CLAUDE.md
-AGENTS.md
-.claude/
-.agents/
-.internal/
