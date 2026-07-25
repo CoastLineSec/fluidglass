@@ -73,6 +73,7 @@ add_library(hyprfluidglass-v2-core STATIC
     src/v2/model/Target.cpp
     src/v2/render/CaptureBlit.cpp
     src/v2/render/CaptureCache.cpp
+    src/v2/render/CaptureEnvironment.cpp
     src/v2/render/CapturePlan.cpp
     src/v2/render/CaptureScene.cpp
     src/v2/render/Geometry.cpp
@@ -213,6 +214,12 @@ if(BUILD_TESTING)
     target_link_libraries(hyprfluidglass-capture-cache-tests PRIVATE hyprfluidglass-v2-core)
     target_compile_options(hyprfluidglass-capture-cache-tests PRIVATE -Wall -Wextra -Wpedantic)
     add_test(NAME hyprfluidglass-capture-cache COMMAND hyprfluidglass-capture-cache-tests)
+
+    add_executable(hyprfluidglass-capture-environment-tests tests/capture_environment_tests.cpp)
+    target_include_directories(hyprfluidglass-capture-environment-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+    target_link_libraries(hyprfluidglass-capture-environment-tests PRIVATE hyprfluidglass-v2-core)
+    target_compile_options(hyprfluidglass-capture-environment-tests PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME hyprfluidglass-capture-environment COMMAND hyprfluidglass-capture-environment-tests)
 
     add_executable(hyprfluidglass-capture-blit-tests tests/capture_blit_tests.cpp)
     target_include_directories(hyprfluidglass-capture-blit-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests")
