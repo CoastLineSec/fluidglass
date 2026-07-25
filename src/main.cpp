@@ -51,6 +51,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cctype>
 #include <cstdint>
 #include <deque>
 #include <format>
@@ -1766,6 +1767,12 @@ bool resolveWindowBind(GlassElement& el, const PHLMONITOR& renderMonitor, bool& 
         if (sel.rfind("0x", 0) == 0)
             sel = sel.substr(2);
     }
+    if (sel.empty() || sel.size() > 256)
+        return false;
+    if (field == 3 && !std::ranges::all_of(sel, [](const unsigned char c) {
+            return std::isxdigit(c);
+        }))
+        return false;
     // Compile the selector once per unique string (std::regex construction is slow, and anchored
     // elements resolve every frame). A nullptr entry marks a pattern that failed to compile. This runs
     // only on the render thread (under g_stateMutex in renderFluidGlass), so the static is safe.
@@ -1789,7 +1796,8 @@ bool resolveWindowBind(GlassElement& el, const PHLMONITOR& renderMonitor, bool& 
         } else {
             try { rePtr = std::make_shared<std::regex>(sel); }
             catch (...) { rePtr = nullptr; }
-            s_reCache[sel] = rePtr;
+            if (s_reCache.size() < 256)
+                s_reCache[sel] = rePtr;
         }
         if (!rePtr) return false;
 
