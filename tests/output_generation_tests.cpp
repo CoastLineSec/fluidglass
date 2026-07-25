@@ -108,6 +108,21 @@ int main() {
             const auto readded = tracker.update(replacement).value().current;
             require(readded.generation == first.generation + 1, "re-added output reused a retired generation");
         }},
+        Case{"clearing active outputs preserves generation history", [] {
+            OutputGenerationTracker tracker;
+            const auto first = tracker.update(output()).value().current;
+            tracker.clearCurrent();
+            require(tracker.currents().empty(),
+                    "cleared output remained current");
+            require(tracker.activeCount() == 0U,
+                    "cleared output remained active");
+
+            auto replacement = output();
+            replacement.objectToken = 2;
+            const auto readded = tracker.update(replacement).value().current;
+            require(readded.generation == first.generation + 1,
+                    "clear reused a retired generation number");
+        }},
         Case{"outputs have independent generation sequences", [] {
             OutputGenerationTracker tracker;
             require(tracker.update(output("DP-1")).value().current.generation == 1,

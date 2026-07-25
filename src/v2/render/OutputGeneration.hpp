@@ -67,6 +67,7 @@ class OutputGenerationTracker {
     [[nodiscard]] std::optional<OutputGeneration> remove(std::string_view name);
     [[nodiscard]] std::optional<OutputGeneration> current(std::string_view name) const;
     [[nodiscard]] std::vector<OutputGeneration> currents() const;
+    void clearCurrent() noexcept;
     [[nodiscard]] std::size_t activeCount() const noexcept;
 
   private:

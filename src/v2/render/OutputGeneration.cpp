@@ -183,6 +183,10 @@ std::vector<OutputGeneration> OutputGenerationTracker::currents() const {
     return result;
 }
 
+void OutputGenerationTracker::clearCurrent() noexcept {
+    m_current.clear();
+}
+
 std::size_t OutputGenerationTracker::activeCount() const noexcept {
     return m_current.size();
 }
