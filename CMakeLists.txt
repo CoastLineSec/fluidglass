@@ -35,6 +35,7 @@ add_library(hyprfluidglass SHARED
     src/v2/render/HyprlandCaptureResource.cpp
     src/v2/render/HyprlandStateGuard.cpp
     src/v2/targets/HyprlandLayerCatalog.cpp
+    src/v2/targets/HyprlandWindowCatalog.cpp
 )
 
 target_include_directories(hyprfluidglass PRIVATE ${HYPRFLUIDGLASS_JSON_INCLUDE})
