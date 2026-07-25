@@ -62,6 +62,7 @@
 #include <set>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -1985,6 +1986,31 @@ bool resolveLayerBind(GlassElement& el, const PHLMONITOR& monitor, double& alpha
 // each frame at POST_WALLPAPER, which precedes the window loop.
 static std::unordered_set<std::string> g_preWindowDrawn;
 
+void pruneRemovedOutputState() {
+    std::set<std::string> activeOutputs;
+    if (g_pCompositor) {
+        for (const auto& monitor : g_pCompositor->m_monitors)
+            if (monitor)
+                activeOutputs.insert(monitor->m_name);
+    }
+
+    const auto outputFromCompositeKey = [](const std::string& key) {
+        return key.substr(0, key.find('/'));
+    };
+    std::erase_if(g_captureFBs, [&](const auto& entry) {
+        return !activeOutputs.contains(outputFromCompositeKey(entry.first));
+    });
+    std::erase_if(g_captureKnownSize, [&](const auto& entry) {
+        return !activeOutputs.contains(outputFromCompositeKey(entry.first));
+    });
+    std::erase_if(g_selfDamage, [&](const auto& entry) {
+        return !activeOutputs.contains(entry.first);
+    });
+    std::erase_if(g_preWindowDrawn, [&](const auto& key) {
+        return !activeOutputs.contains(outputFromCompositeKey(key));
+    });
+}
+
 void renderFluidGlassImpl(eRenderStage stage) {
     if (stage != RENDER_POST_WINDOWS && stage != RENDER_POST_WALLPAPER && stage != RENDER_PRE_WINDOW) return;
     if (!g_pHyprRenderer) return;
@@ -2006,6 +2032,9 @@ void renderFluidGlassImpl(eRenderStage stage) {
         if (!g_enabled || g_elements.empty()) return;
         const auto monitor = g_pHyprRenderer->renderData().pMonitor.lock();
         if (!monitor) return;
+
+        if (isWindowsStage)
+            pruneRemovedOutputState();
 
         if (stage == RENDER_POST_WALLPAPER) {
             // New frame for this monitor: reset the pre-window draw guard.
