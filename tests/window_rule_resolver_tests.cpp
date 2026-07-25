@@ -90,7 +90,7 @@ int main() {
             require(result.value().size() == 1U, "wrong resolved rule count");
             const auto& target = result.value().front();
             require(target.attachment.identity.owner == "config", "wrong durable owner");
-            require(target.attachment.identity.targetId == "files.91", "unstable durable target id");
+            require(target.attachment.identity.targetId == "window.files.91", "unstable durable target id");
             require(target.definition.material == MaterialReference{
                 .source = MaterialSource::Config,
                 .name = "fluid",
@@ -108,8 +108,8 @@ int main() {
             const auto result =
                 resolveWindowRules(config(), windows);
             require(result.hasValue() && result.value().size() == 2U, "multiple windows did not resolve");
-            require(result.value()[0].definition.id == "files.91", "first target id changed");
-            require(result.value()[1].definition.id == "files.92", "second target id changed");
+            require(result.value()[0].definition.id == "window.files.91", "first target id changed");
+            require(result.value()[1].definition.id == "window.files.92", "second target id changed");
         }},
         Case{"unmatched and unavailable windows are omitted", [] {
             auto unmatched = window();

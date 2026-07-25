@@ -54,7 +54,7 @@ resolveLayerRules(
                 "matched layer rule references a missing material");
 
         Target definition{
-            .id = rule->id + "." +
+            .id = "layer." + rule->id + "." +
                 std::to_string(surface.objectToken),
             .kind = TargetKind::Layer,
             .material = MaterialReference{

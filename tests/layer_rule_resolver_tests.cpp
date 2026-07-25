@@ -77,7 +77,7 @@ int main() {
             require(result.hasValue() && result.value().size() == 1U, "layer rule did not resolve");
             const auto& target = result.value().front();
             require(target.attachment.identity.owner == "config", "wrong durable owner");
-            require(target.definition.id == "shell-primary.51", "unstable durable target id");
+            require(target.definition.id == "layer.shell-primary.51", "unstable durable target id");
             require(target.definition.material == MaterialReference{
                 .source = MaterialSource::Config,
                 .name = "fluid",
@@ -93,7 +93,7 @@ int main() {
             const auto result =
                 resolveLayerRules(config(), surfaces);
             require(result.hasValue() && result.value().size() == 1U, "regex layer rule did not resolve");
-            require(result.value().front().definition.id == "shell.52", "regex rule id changed");
+            require(result.value().front().definition.id == "layer.shell.52", "regex rule id changed");
             require(result.value().front().definition.material.name == "clear", "regex material changed");
         }},
         Case{"unmatched and unavailable layers are omitted", [] {

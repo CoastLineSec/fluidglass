@@ -100,7 +100,7 @@ resolveWindowRules(
             selector.initialClass = window.initialClass;
 
         Target definition{
-            .id = rule->id + "." +
+            .id = "window." + rule->id + "." +
                 std::to_string(window.objectToken),
             .kind = TargetKind::Window,
             .material = MaterialReference{
