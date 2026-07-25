@@ -12,6 +12,8 @@
 
 namespace hfg::v2 {
 
+// Wayland output transforms. Rotation is counter-clockwise from framebuffer
+// space to output-oriented space.
 enum class OutputTransform {
     Normal,
     Rotate90,
@@ -55,6 +57,8 @@ struct OutputGenerationUpdate {
 
     friend bool operator==(const OutputGenerationUpdate&, const OutputGenerationUpdate&) = default;
 };
+
+[[nodiscard]] Result<void> validateOutputSnapshot(const OutputSnapshot& snapshot);
 
 class OutputGenerationTracker {
   public:

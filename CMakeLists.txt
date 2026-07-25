@@ -63,6 +63,7 @@ add_library(hyprfluidglass-v2-core STATIC
     src/v2/model/Readiness.cpp
     src/v2/model/Session.cpp
     src/v2/model/Target.cpp
+    src/v2/render/Geometry.cpp
     src/v2/render/OutputGeneration.cpp
     src/v2/runtime/Runtime.cpp
 )
@@ -151,6 +152,12 @@ if(BUILD_TESTING)
     target_link_libraries(hyprfluidglass-output-generation-tests PRIVATE hyprfluidglass-v2-core)
     target_compile_options(hyprfluidglass-output-generation-tests PRIVATE -Wall -Wextra -Wpedantic)
     add_test(NAME hyprfluidglass-output-generation COMMAND hyprfluidglass-output-generation-tests)
+
+    add_executable(hyprfluidglass-geometry-tests tests/geometry_tests.cpp)
+    target_include_directories(hyprfluidglass-geometry-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+    target_link_libraries(hyprfluidglass-geometry-tests PRIVATE hyprfluidglass-v2-core)
+    target_compile_options(hyprfluidglass-geometry-tests PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME hyprfluidglass-geometry COMMAND hyprfluidglass-geometry-tests)
 
     add_executable(hyprfluidglass-protocol-tests tests/protocol_tests.cpp)
     target_include_directories(hyprfluidglass-protocol-tests PRIVATE

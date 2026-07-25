@@ -44,39 +44,87 @@ bool validTransform(OutputTransform transform) {
     return false;
 }
 
-std::optional<Error> validateSnapshot(const OutputSnapshot& snapshot) {
-    if (!validName(snapshot.name))
-        return Error{ErrorCode::InvalidRequest, "output.name", "expected a non-empty bounded output name"};
-    if (snapshot.objectToken == 0U)
-        return Error{ErrorCode::InvalidRequest, "output.object_token", "output object token must not be zero"};
-    if (snapshot.modeToken == 0U)
-        return Error{ErrorCode::InvalidRequest, "output.mode_token", "output mode token must not be zero"};
-    if (snapshot.bufferWidth == 0U || snapshot.bufferWidth > Limits::MAX_OUTPUT_BUFFER_DIMENSION)
-        return Error{ErrorCode::ResourceLimited, "output.buffer_width", "output buffer width is outside the supported limit"};
-    if (snapshot.bufferHeight == 0U || snapshot.bufferHeight > Limits::MAX_OUTPUT_BUFFER_DIMENSION)
-        return Error{ErrorCode::ResourceLimited, "output.buffer_height", "output buffer height is outside the supported limit"};
-    if (!validLogicalCoordinate(snapshot.logicalX))
-        return Error{ErrorCode::InvalidRequest, "output.logical_x", "expected a finite logical coordinate"};
-    if (!validLogicalCoordinate(snapshot.logicalY))
-        return Error{ErrorCode::InvalidRequest, "output.logical_y", "expected a finite logical coordinate"};
-    if (!validLogicalSize(snapshot.logicalWidth))
-        return Error{ErrorCode::InvalidRequest, "output.logical_width", "expected a finite positive logical size"};
-    if (!validLogicalSize(snapshot.logicalHeight))
-        return Error{ErrorCode::InvalidRequest, "output.logical_height", "expected a finite positive logical size"};
-    if (!std::isfinite(snapshot.scale) || snapshot.scale <= 0.0 || snapshot.scale > MAX_OUTPUT_SCALE)
-        return Error{ErrorCode::InvalidRequest, "output.scale", "expected a finite positive output scale"};
-    if (!validTransform(snapshot.transform))
-        return Error{ErrorCode::InvalidRequest, "output.transform", "unsupported output transform"};
-    if (snapshot.renderFormat == 0U)
-        return Error{ErrorCode::InvalidRequest, "output.render_format", "render format must not be zero"};
-    return std::nullopt;
-}
-
 } // namespace
 
+Result<void> validateOutputSnapshot(const OutputSnapshot& snapshot) {
+    if (!validName(snapshot.name))
+        return Result<void>::failure({
+            ErrorCode::InvalidRequest,
+            "output.name",
+            "expected a non-empty bounded output name",
+        });
+    if (snapshot.objectToken == 0U)
+        return Result<void>::failure({
+            ErrorCode::InvalidRequest,
+            "output.object_token",
+            "output object token must not be zero",
+        });
+    if (snapshot.modeToken == 0U)
+        return Result<void>::failure({
+            ErrorCode::InvalidRequest,
+            "output.mode_token",
+            "output mode token must not be zero",
+        });
+    if (snapshot.bufferWidth == 0U || snapshot.bufferWidth > Limits::MAX_OUTPUT_BUFFER_DIMENSION)
+        return Result<void>::failure({
+            ErrorCode::ResourceLimited,
+            "output.buffer_width",
+            "output buffer width is outside the supported limit",
+        });
+    if (snapshot.bufferHeight == 0U || snapshot.bufferHeight > Limits::MAX_OUTPUT_BUFFER_DIMENSION)
+        return Result<void>::failure({
+            ErrorCode::ResourceLimited,
+            "output.buffer_height",
+            "output buffer height is outside the supported limit",
+        });
+    if (!validLogicalCoordinate(snapshot.logicalX))
+        return Result<void>::failure({
+            ErrorCode::InvalidRequest,
+            "output.logical_x",
+            "expected a finite logical coordinate",
+        });
+    if (!validLogicalCoordinate(snapshot.logicalY))
+        return Result<void>::failure({
+            ErrorCode::InvalidRequest,
+            "output.logical_y",
+            "expected a finite logical coordinate",
+        });
+    if (!validLogicalSize(snapshot.logicalWidth))
+        return Result<void>::failure({
+            ErrorCode::InvalidRequest,
+            "output.logical_width",
+            "expected a finite positive logical size",
+        });
+    if (!validLogicalSize(snapshot.logicalHeight))
+        return Result<void>::failure({
+            ErrorCode::InvalidRequest,
+            "output.logical_height",
+            "expected a finite positive logical size",
+        });
+    if (!std::isfinite(snapshot.scale) || snapshot.scale <= 0.0 || snapshot.scale > MAX_OUTPUT_SCALE)
+        return Result<void>::failure({
+            ErrorCode::InvalidRequest,
+            "output.scale",
+            "expected a finite positive output scale",
+        });
+    if (!validTransform(snapshot.transform))
+        return Result<void>::failure({
+            ErrorCode::InvalidRequest,
+            "output.transform",
+            "unsupported output transform",
+        });
+    if (snapshot.renderFormat == 0U)
+        return Result<void>::failure({
+            ErrorCode::InvalidRequest,
+            "output.render_format",
+            "render format must not be zero",
+        });
+    return Result<void>::success();
+}
+
 Result<OutputGenerationUpdate> OutputGenerationTracker::update(OutputSnapshot snapshot) {
-    if (auto error = validateSnapshot(snapshot))
-        return Result<OutputGenerationUpdate>::failure(std::move(*error));
+    if (auto validation = validateOutputSnapshot(snapshot); !validation)
+        return Result<OutputGenerationUpdate>::failure(validation.error());
 
     const auto currentEntry = m_current.find(snapshot.name);
     if (currentEntry != m_current.end() && currentEntry->second.snapshot == snapshot)
