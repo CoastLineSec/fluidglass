@@ -250,7 +250,11 @@ The initial shape vocabulary is generic:
 - `ring`
 - `compound`
 
-There are no shell-specific shape names in the plugin.
+Compound shapes describe bounded target-local assemblies: an optional filled
+base and rounded cutout, independently rounded parts, joined-edge fillets,
+bridging rectangles, and per-part material extents. This representation keeps
+multi-surface frames and connected shell elements generic instead of encoding
+shell-specific shape names in the plugin.
 
 ## Rendering pipeline
 
@@ -317,4 +321,3 @@ V2 does not:
 Hyprland plugins are ABI-coupled to Hyprland. HyprFluidGlass supports explicitly
 tested Hyprland release pins. New releases are added after build and live
 validation; support is not inferred merely because the source compiles.
-

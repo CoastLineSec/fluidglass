@@ -112,7 +112,9 @@ Response fields include:
       "sessions": 64,
       "targets_per_session": 256,
       "dynamic_targets": 512,
-      "materials_per_owner": 128
+      "materials_per_owner": 128,
+      "compound_parts": 32,
+      "compound_connectors": 32
     }
   }
 }
@@ -381,28 +383,84 @@ non-negative.
 ```json
 {
   "kind": "compound",
+  "base": {
+    "radius": 28
+  },
+  "cutout": {
+    "x": 32,
+    "y": 32,
+    "width": 796,
+    "height": 656,
+    "corner_radii": {
+      "top_left": 20,
+      "top_right": 20,
+      "bottom_right": 16,
+      "bottom_left": 16
+    }
+  },
   "parts": [
     {
       "x": 0,
       "y": 0,
-      "width": 600,
+      "width": 860,
       "height": 44,
-      "radius": 22
-    },
-    {
-      "x": 608,
-      "y": 0,
-      "width": 220,
-      "height": 44,
-      "radius": 22
+      "corner_radii": {
+        "top_left": 22,
+        "top_right": 22,
+        "bottom_right": 8,
+        "bottom_left": 8
+      },
+      "junctions": {
+        "top_left": 0,
+        "top_right": 7,
+        "bottom_right": 7,
+        "bottom_left": 0
+      },
+      "material_extent": {
+        "x": -8,
+        "y": -8,
+        "width": 876,
+        "height": 60
+      },
+      "opacity": 0.75
     }
-  ]
+  ],
+  "connectors": [
+    {
+      "x": 16,
+      "y": 40,
+      "width": 12,
+      "height": 12
+    }
+  ],
+  "connector_curve": 7
 }
 ```
 
-Compound parts are relative to the target geometry. Part count is bounded and
-reported through `capabilities`. Empty compounds and non-positive part sizes
-are invalid.
+A compound is a bounded assembly in target-local logical coordinates:
+
+- `base` optionally fills the target geometry.
+- `cutout` subtracts one rounded rectangle from the base and is valid only
+  when `base` is present.
+- `parts` adds independently rounded rectangles.
+- `connectors` adds bridging rectangles to the combined mask.
+- `connector_curve` is a finite, non-negative curve value used where joined
+  pieces meet.
+
+Every rounded element accepts either a uniform `radius` or a `corner_radii`
+object, never both. A `corner_radii` object contains all four fields:
+`top_left`, `top_right`, `bottom_right`, and `bottom_left`.
+
+Each part may also declare:
+
+- `junctions`: four non-negative corner values for joined-edge fillets.
+- `material_extent`: the target-local rectangle used for that part's material
+  sampling bounds. It defaults to the part rectangle.
+- `opacity`: a finite value from `0` to `1`, defaulting to `1`.
+
+A compound must contain a base or at least one part. Cutouts, parts, material
+extents, and connectors require positive sizes. Part and connector limits are
+reported through `capabilities`.
 
 ## Heartbeats and expiry
 
