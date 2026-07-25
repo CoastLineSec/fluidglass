@@ -466,7 +466,11 @@ double evalBezierSpline(const std::vector<double>& c, double x) {
 }
 
 double jnum(const json& o, std::string_view k, double def = 0.0) {
-    if (auto it = o.find(k); it != o.end() && it->is_number()) return it->get<double>();
+    if (auto it = o.find(k); it != o.end() && it->is_number()) {
+        const double value = it->get<double>();
+        if (std::isfinite(value))
+            return value;
+    }
     return def;
 }
 bool jbool(const json& o, std::string_view k, bool def = false) {
@@ -476,6 +480,14 @@ bool jbool(const json& o, std::string_view k, bool def = false) {
 std::string jstr(const json& o, std::string_view k) {
     if (auto it = o.find(k); it != o.end() && it->is_string()) return it->get<std::string>();
     return "";
+}
+
+std::chrono::milliseconds boundedElapsedMilliseconds(double value) {
+    constexpr double MAX_ELAPSED_MS = 24.0 * 60.0 * 60.0 * 1000.0;
+    if (!std::isfinite(value))
+        return std::chrono::milliseconds{0};
+    const double bounded = std::clamp(value, 0.0, MAX_ELAPSED_MS);
+    return std::chrono::milliseconds{static_cast<std::chrono::milliseconds::rep>(std::llround(bounded))};
 }
 void parseHex(const std::string& hex, float& r, float& g, float& b) {
     if (hex.size() < 4 || hex[0] != '#') return;
@@ -2644,7 +2656,18 @@ std::string applyPayload(std::string payload) {
             el.gloss       = jnum(e, "gloss",      el.gloss);
             el.blurLevel    = jnum(e, "blurLevel", -1.0);
             el.tintLevel    = jnum(e, "tintLevel", -1.0);
-            el.rev          = static_cast<uint64_t>(jnum(e, "rev", 0.0));   // P4: shell-owned descriptor revision
+            if (auto revision = e.find("rev"); revision != e.end()) {
+                if (revision->is_number_unsigned()) {
+                    el.rev = revision->get<uint64_t>();
+                } else if (revision->is_number_integer()) {
+                    const auto signedRevision = revision->get<int64_t>();
+                    if (signedRevision < 0)
+                        return rejectApply("element revision must not be negative");
+                    el.rev = static_cast<uint64_t>(signedRevision);
+                } else {
+                    return rejectApply("element revision must be an integer");
+                }
+            }
             bool requestedBind = false;
             if (auto b = e.find("bind"); b != e.end()) {
                 requestedBind   = true;
@@ -2678,7 +2701,7 @@ std::string applyPayload(std::string payload) {
                 el.elTrDurMs  = jnum(*tj, "durationMs", 0.0);
                 el.elTrTravel = jnum(*tj, "travelPx", 0.0);
                 const double trElapsedMs = jnum(*tj, "elapsedMs", 0.0);
-                el.elTrStart = std::chrono::steady_clock::now() - std::chrono::milliseconds(static_cast<long>(trElapsedMs));
+                el.elTrStart = std::chrono::steady_clock::now() - boundedElapsedMilliseconds(trElapsedMs);
                 if (auto bz = tj->find("bezier"); bz != tj->end() && bz->is_array()) {
                     el.elTrBezier.clear();
                     for (const auto& v : *bz)
@@ -2710,7 +2733,7 @@ std::string applyPayload(std::string payload) {
                         part.trProtrusion = jnum(*tj, "protrusionPx", 0.0);
                         part.trTravel     = jnum(*tj, "travelPx", part.trProtrusion);
                         const double elapsed = jnum(*tj, "elapsedMs", 0.0);
-                        part.trStart = std::chrono::steady_clock::now() - std::chrono::milliseconds(static_cast<long>(elapsed));
+                        part.trStart = std::chrono::steady_clock::now() - boundedElapsedMilliseconds(elapsed);
                         if (auto bz = tj->find("bezier"); bz != tj->end() && bz->is_array()) {
                             part.trBezier.clear();
                             for (const auto& v : *bz)
