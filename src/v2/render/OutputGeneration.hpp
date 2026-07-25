@@ -9,6 +9,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace hfg::v2 {
 
@@ -65,6 +66,7 @@ class OutputGenerationTracker {
     [[nodiscard]] Result<OutputGenerationUpdate> update(OutputSnapshot snapshot);
     [[nodiscard]] std::optional<OutputGeneration> remove(std::string_view name);
     [[nodiscard]] std::optional<OutputGeneration> current(std::string_view name) const;
+    [[nodiscard]] std::vector<OutputGeneration> currents() const;
     [[nodiscard]] std::size_t activeCount() const noexcept;
 
   private:

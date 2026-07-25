@@ -7,6 +7,7 @@
 #include <limits>
 #include <string>
 #include <utility>
+#include <vector>
 
 using hfg::test::Case;
 using hfg::test::require;
@@ -119,6 +120,28 @@ int main() {
                     "first output generation did not advance independently");
             require(tracker.current("HDMI-A-1")->generation == 1,
                     "second output inherited another output's generation");
+        }},
+        Case{"current generations are enumerated in name order", [] {
+            OutputGenerationTracker tracker;
+            require(tracker.update(output("HDMI-A-1")).hasValue(),
+                    "second output update failed");
+            require(tracker.update(output("DP-1")).hasValue(),
+                    "first output update failed");
+
+            const auto currents = tracker.currents();
+            require(currents.size() == 2U,
+                    "current generation enumeration changed size");
+            require(currents[0].snapshot.name == "DP-1",
+                    "current generations are not name ordered");
+            require(currents[1].snapshot.name == "HDMI-A-1",
+                    "current generations are not name ordered");
+
+            require(tracker.remove("DP-1").has_value(),
+                    "current output removal failed");
+            const auto remaining = tracker.currents();
+            require(remaining.size() == 1U &&
+                        remaining[0].snapshot.name == "HDMI-A-1",
+                    "retired output remained in current enumeration");
         }},
         Case{"all Wayland transforms are accepted", [] {
             OutputGenerationTracker tracker;

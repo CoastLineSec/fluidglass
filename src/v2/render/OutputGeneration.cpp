@@ -173,6 +173,16 @@ std::optional<OutputGeneration> OutputGenerationTracker::current(std::string_vie
     return entry->second;
 }
 
+std::vector<OutputGeneration> OutputGenerationTracker::currents() const {
+    std::vector<OutputGeneration> result;
+    result.reserve(m_current.size());
+    for (const auto& [name, generation] : m_current) {
+        static_cast<void>(name);
+        result.push_back(generation);
+    }
+    return result;
+}
+
 std::size_t OutputGenerationTracker::activeCount() const noexcept {
     return m_current.size();
 }
