@@ -54,22 +54,22 @@ set_target_properties(hyprfluidglass PROPERTIES
 
 install(TARGETS hyprfluidglass LIBRARY DESTINATION lib/hyprland)
 
+add_library(hyprfluidglass-v2-core STATIC
+    src/v2/ipc/Protocol.cpp
+    src/v2/model/Config.cpp
+    src/v2/model/Material.cpp
+    src/v2/model/Readiness.cpp
+    src/v2/model/Session.cpp
+    src/v2/model/Target.cpp
+)
+target_include_directories(hyprfluidglass-v2-core PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${HYPRFLUIDGLASS_JSON_INCLUDE}"
+)
+target_compile_options(hyprfluidglass-v2-core PRIVATE -Wall -Wextra -Wpedantic)
+
 include(CTest)
 if(BUILD_TESTING)
-    add_library(hyprfluidglass-v2-core STATIC
-        src/v2/ipc/Protocol.cpp
-        src/v2/model/Config.cpp
-        src/v2/model/Material.cpp
-        src/v2/model/Readiness.cpp
-        src/v2/model/Session.cpp
-        src/v2/model/Target.cpp
-    )
-    target_include_directories(hyprfluidglass-v2-core PUBLIC
-        "${CMAKE_CURRENT_SOURCE_DIR}/src"
-        "${HYPRFLUIDGLASS_JSON_INCLUDE}"
-    )
-    target_compile_options(hyprfluidglass-v2-core PRIVATE -Wall -Wextra -Wpedantic)
-
     add_executable(hyprfluidglass-core-tests tests/core_tests.cpp)
     target_include_directories(hyprfluidglass-core-tests PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/src"
