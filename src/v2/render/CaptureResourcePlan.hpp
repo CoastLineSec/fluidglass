@@ -27,6 +27,7 @@ struct CaptureResourcePlan {
     std::vector<CaptureResource>        retire;
     std::vector<CaptureResourceBinding> bindings;
     std::uint64_t                       totalBytes = 0;
+    bool                                allocateBeforeRetire = false;
 
     friend bool operator==(
         const CaptureResourcePlan&,

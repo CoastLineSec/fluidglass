@@ -82,6 +82,8 @@ int main() {
                             9U &&
                         !result.value().bindings[0].allocationIndex,
                     "capture was not bound to retained token");
+            require(result.value().allocateBeforeRetire,
+                    "zero-allocation reconciliation was not safe");
         }},
         Case{"one covering resource can satisfy multiple captures", [] {
             const std::array current{
@@ -146,6 +148,8 @@ int main() {
             require(result.value().retire ==
                         std::vector{current.front()},
                     "oversized resource was not retired");
+            require(!result.value().allocateBeforeRetire,
+                    "peak memory budget was bypassed");
         }},
         Case{"stale generations and incompatible keys never reuse", [] {
             const std::array current{
@@ -207,6 +211,31 @@ int main() {
             require(result.value().bindings[0].allocationIndex == 0U &&
                         !result.value().bindings[0].retainedToken,
                     "new capture binding is malformed");
+        }},
+        Case{"allocation precedes retirement only within peak budget", [] {
+            const std::array current{
+                resource(5, {0, 0, 20, 20}),
+            };
+            auto next = capture({50, 50, 20, 20});
+            next.key.output = "HDMI-A-1";
+            const std::array desired{next};
+
+            const auto roomy = planCaptureResources(
+                current,
+                desired,
+                current.front().plan.byteCount +
+                    desired.front().byteCount);
+            require(roomy.hasValue() &&
+                        roomy.value().allocateBeforeRetire,
+                    "safe make-before-break was not selected");
+
+            const auto tight = planCaptureResources(
+                current,
+                desired,
+                desired.front().byteCount);
+            require(tight.hasValue() &&
+                        !tight.value().allocateBeforeRetire,
+                    "unsafe make-before-break was selected");
         }},
         Case{"empty desired scene retires every resource", [] {
             const std::array current{

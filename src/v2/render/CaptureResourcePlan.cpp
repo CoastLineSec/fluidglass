@@ -132,6 +132,16 @@ planCaptureResources(
             ErrorCode::ResourceLimited,
             "desired",
             "desired captures exceed the total capture byte budget");
+    std::uint64_t currentBytes = 0;
+    for (const auto& resource : current) {
+        if (!addWithoutOverflow(
+                currentBytes,
+                resource.plan.byteCount))
+            return failure(
+                ErrorCode::ResourceLimited,
+                "current",
+                "current capture byte total overflows");
+    }
 
     std::vector<std::optional<std::uint64_t>>
         retainedByCapture(desired.size());
@@ -228,6 +238,7 @@ planCaptureResources(
         .retire = {},
         .bindings = {},
         .totalBytes = projectedBytes,
+        .allocateBeforeRetire = false,
     };
     for (const auto& resource : current) {
         if (selectedTokens.contains(resource.token))
@@ -256,6 +267,19 @@ planCaptureResources(
             .allocationIndex = allocationIndex,
         });
     }
+    std::uint64_t allocationBytes = 0;
+    for (const auto& capture : plan.allocate) {
+        if (!addWithoutOverflow(
+                allocationBytes,
+                capture.byteCount))
+            return failure(
+                ErrorCode::ResourceLimited,
+                "allocate",
+                "capture allocation byte total overflows");
+    }
+    plan.allocateBeforeRetire =
+        currentBytes <= maxTotalBytes &&
+        allocationBytes <= maxTotalBytes - currentBytes;
     return Result<CaptureResourcePlan>::success(
         std::move(plan));
 }
