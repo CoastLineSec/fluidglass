@@ -56,6 +56,12 @@ install(TARGETS hyprfluidglass LIBRARY DESTINATION lib/hyprland)
 
 include(CTest)
 if(BUILD_TESTING)
+    add_library(hyprfluidglass-v2-core STATIC
+        src/v2/model/Material.cpp
+    )
+    target_include_directories(hyprfluidglass-v2-core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_compile_options(hyprfluidglass-v2-core PRIVATE -Wall -Wextra -Wpedantic)
+
     add_executable(hyprfluidglass-core-tests tests/core_tests.cpp)
     target_include_directories(hyprfluidglass-core-tests PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/src"
@@ -63,4 +69,10 @@ if(BUILD_TESTING)
     )
     target_compile_options(hyprfluidglass-core-tests PRIVATE -Wall -Wextra -Wpedantic)
     add_test(NAME hyprfluidglass-core COMMAND hyprfluidglass-core-tests)
+
+    add_executable(hyprfluidglass-material-tests tests/material_tests.cpp)
+    target_include_directories(hyprfluidglass-material-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+    target_link_libraries(hyprfluidglass-material-tests PRIVATE hyprfluidglass-v2-core)
+    target_compile_options(hyprfluidglass-material-tests PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME hyprfluidglass-material COMMAND hyprfluidglass-material-tests)
 endif()
