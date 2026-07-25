@@ -57,6 +57,41 @@ json rectJson(const Rect& rect, std::string_view space) {
     };
 }
 
+json localRectJson(const Rect& rect) {
+    return {
+        {"x", rect.x},
+        {"y", rect.y},
+        {"width", rect.width},
+        {"height", rect.height},
+    };
+}
+
+json cornerRadiiJson(const CornerRadii& corners) {
+    return {
+        {"top_left", corners.topLeft},
+        {"top_right", corners.topRight},
+        {"bottom_right", corners.bottomRight},
+        {"bottom_left", corners.bottomLeft},
+    };
+}
+
+bool uniformCorners(const CornerRadii& corners) {
+    return corners.topLeft == corners.topRight &&
+        corners.topLeft == corners.bottomRight &&
+        corners.topLeft == corners.bottomLeft;
+}
+
+bool emptyCorners(const CornerRadii& corners) {
+    return corners == CornerRadii{};
+}
+
+void insertCorners(json& object, const CornerRadii& corners) {
+    if (uniformCorners(corners))
+        object["radius"] = corners.topLeft;
+    else
+        object["corner_radii"] = cornerRadiiJson(corners);
+}
+
 json shapeJson(const Shape& shape) {
     return std::visit([](const auto& value) -> json {
         using T = std::decay_t<decltype(value)>;
@@ -74,18 +109,39 @@ json shapeJson(const Shape& shape) {
         } else {
             json parts = json::array();
             for (const auto& part : value.parts) {
-                parts.push_back({
-                    {"x", part.rect.x},
-                    {"y", part.rect.y},
-                    {"width", part.rect.width},
-                    {"height", part.rect.height},
-                    {"radius", part.corners.topLeft},
-                });
+                json serialized = localRectJson(part.rect);
+                insertCorners(serialized, part.corners);
+                if (!emptyCorners(part.junctions))
+                    serialized["junctions"] = cornerRadiiJson(part.junctions);
+                if (part.materialExtent)
+                    serialized["material_extent"] = localRectJson(*part.materialExtent);
+                if (part.opacity != 1.0)
+                    serialized["opacity"] = part.opacity;
+                parts.push_back(std::move(serialized));
             }
-            return {
+            json serialized{
                 {"kind", "compound"},
                 {"parts", std::move(parts)},
             };
+            if (value.base) {
+                json base = json::object();
+                insertCorners(base, value.base->corners);
+                serialized["base"] = std::move(base);
+            }
+            if (value.cutout) {
+                json cutout = localRectJson(value.cutout->rect);
+                insertCorners(cutout, value.cutout->corners);
+                serialized["cutout"] = std::move(cutout);
+            }
+            if (!value.connectors.empty()) {
+                json connectors = json::array();
+                for (const auto& connector : value.connectors)
+                    connectors.push_back(localRectJson(connector));
+                serialized["connectors"] = std::move(connectors);
+            }
+            if (value.connectorCurve != 0.0)
+                serialized["connector_curve"] = value.connectorCurve;
+            return serialized;
         }
     }, shape);
 }
@@ -181,6 +237,7 @@ json capabilitiesJson() {
             {"dynamic_targets", Limits::MAX_DYNAMIC_TARGETS},
             {"materials_per_owner", Limits::MAX_MATERIALS_PER_OWNER},
             {"compound_parts", Limits::MAX_COMPOUND_PARTS},
+            {"compound_connectors", Limits::MAX_COMPOUND_CONNECTORS},
         }},
     };
 }

@@ -262,6 +262,92 @@ Result<Rect> parseRect(const json& object, std::string path, std::string_view ex
     return Result<Rect>::success(rect);
 }
 
+Result<Rect> parseLocalRect(const json& object, std::string path) {
+    if (!object.is_object())
+        return invalid<Rect>(ErrorCode::InvalidTarget, std::move(path), "rectangle must be an object");
+    static const std::set<std::string_view> fields{"x", "y", "width", "height"};
+    if (auto error = rejectUnknown(object, fields, path, ErrorCode::InvalidTarget))
+        return Result<Rect>::failure(std::move(*error));
+
+    Rect rect;
+    for (const auto& [key, destination] : {
+             std::pair<std::string_view, double*>{"x", &rect.x},
+             {"y", &rect.y},
+             {"width", &rect.width},
+             {"height", &rect.height},
+         }) {
+        const auto value = object.find(key);
+        if (value == object.end() || !value->is_number())
+            return invalid<Rect>(ErrorCode::InvalidTarget, path + "." + std::string(key), "expected a number");
+        *destination = value->get<double>();
+        if (!std::isfinite(*destination))
+            return invalid<Rect>(ErrorCode::InvalidTarget, path + "." + std::string(key), "expected a finite number");
+    }
+    return Result<Rect>::success(rect);
+}
+
+Result<CornerRadii> parseCornerRadii(const json& object, std::string path) {
+    if (!object.is_object())
+        return invalid<CornerRadii>(ErrorCode::InvalidTarget, std::move(path), "corner radii must be an object");
+    static const std::set<std::string_view> fields{
+        "top_left", "top_right", "bottom_right", "bottom_left",
+    };
+    if (auto error = rejectUnknown(object, fields, path, ErrorCode::InvalidTarget))
+        return Result<CornerRadii>::failure(std::move(*error));
+
+    CornerRadii corners;
+    for (const auto& [key, destination] : {
+             std::pair<std::string_view, double*>{"top_left", &corners.topLeft},
+             {"top_right", &corners.topRight},
+             {"bottom_right", &corners.bottomRight},
+             {"bottom_left", &corners.bottomLeft},
+         }) {
+        const auto value = object.find(key);
+        if (value == object.end() || !value->is_number())
+            return invalid<CornerRadii>(
+                ErrorCode::InvalidTarget,
+                path + "." + std::string(key),
+                "expected a number");
+        *destination = value->get<double>();
+        if (!std::isfinite(*destination))
+            return invalid<CornerRadii>(
+                ErrorCode::InvalidTarget,
+                path + "." + std::string(key),
+                "expected a finite number");
+    }
+    return Result<CornerRadii>::success(corners);
+}
+
+Result<CornerRadii> parseCornerFields(
+    const json& object,
+    std::string path,
+    std::string_view radiusField = "radius",
+    std::string_view cornersField = "corner_radii") {
+    const auto radius = object.find(radiusField);
+    const auto corners = object.find(cornersField);
+    if (radius != object.end() && corners != object.end())
+        return invalid<CornerRadii>(
+            ErrorCode::InvalidTarget,
+            path,
+            std::string(radiusField) + " and " + std::string(cornersField) + " are mutually exclusive");
+    if (corners != object.end())
+        return parseCornerRadii(*corners, path + "." + std::string(cornersField));
+    if (radius == object.end())
+        return Result<CornerRadii>::success({});
+    if (!radius->is_number())
+        return invalid<CornerRadii>(
+            ErrorCode::InvalidTarget,
+            path + "." + std::string(radiusField),
+            "expected a number");
+    const double value = radius->get<double>();
+    if (!std::isfinite(value))
+        return invalid<CornerRadii>(
+            ErrorCode::InvalidTarget,
+            path + "." + std::string(radiusField),
+            "expected a finite number");
+    return Result<CornerRadii>::success({value, value, value, value});
+}
+
 Result<Shape> parseShape(const json& object, std::string path) {
     if (!object.is_object())
         return invalid<Shape>(ErrorCode::InvalidTarget, std::move(path), "shape must be an object");
@@ -290,43 +376,134 @@ Result<Shape> parseShape(const json& object, std::string path) {
         return Result<Shape>::success(shape);
     }
     if (kind.value() == "compound") {
-        static const std::set<std::string_view> fields{"kind", "parts"};
+        static const std::set<std::string_view> fields{
+            "kind", "base", "cutout", "parts", "connectors", "connector_curve",
+        };
         if (auto error = rejectUnknown(object, fields, path, ErrorCode::InvalidTarget))
             return Result<Shape>::failure(std::move(*error));
-        const auto parts = object.find("parts");
-        if (parts == object.end() || !parts->is_array())
-            return invalid<Shape>(ErrorCode::InvalidTarget, path + ".parts", "parts must be an array");
-        if (parts->size() > Limits::MAX_COMPOUND_PARTS)
-            return invalid<Shape>(ErrorCode::ResourceLimited, path + ".parts", "compound part limit exceeded");
 
         CompoundShape shape;
-        for (std::size_t index = 0; index < parts->size(); ++index) {
+        if (const auto base = object.find("base"); base != object.end()) {
+            const auto basePath = path + ".base";
+            if (!base->is_object())
+                return invalid<Shape>(ErrorCode::InvalidTarget, basePath, "base must be an object");
+            static const std::set<std::string_view> baseFields{"radius", "corner_radii"};
+            if (auto error = rejectUnknown(*base, baseFields, basePath, ErrorCode::InvalidTarget))
+                return Result<Shape>::failure(std::move(*error));
+            auto corners = parseCornerFields(*base, basePath);
+            if (!corners)
+                return Result<Shape>::failure(corners.error());
+            shape.base = CompoundBase{.corners = std::move(corners.value())};
+        }
+
+        if (const auto cutout = object.find("cutout"); cutout != object.end()) {
+            const auto cutoutPath = path + ".cutout";
+            if (!cutout->is_object())
+                return invalid<Shape>(ErrorCode::InvalidTarget, cutoutPath, "cutout must be an object");
+            static const std::set<std::string_view> cutoutFields{
+                "x", "y", "width", "height", "radius", "corner_radii",
+            };
+            if (auto error = rejectUnknown(*cutout, cutoutFields, cutoutPath, ErrorCode::InvalidTarget))
+                return Result<Shape>::failure(std::move(*error));
+            json rectObject = {
+                {"x", cutout->value("x", json())},
+                {"y", cutout->value("y", json())},
+                {"width", cutout->value("width", json())},
+                {"height", cutout->value("height", json())},
+            };
+            auto rect = parseLocalRect(rectObject, cutoutPath);
+            if (!rect)
+                return Result<Shape>::failure(rect.error());
+            auto corners = parseCornerFields(*cutout, cutoutPath);
+            if (!corners)
+                return Result<Shape>::failure(corners.error());
+            shape.cutout = CompoundCutout{
+                .rect = std::move(rect.value()),
+                .corners = std::move(corners.value()),
+            };
+        }
+
+        const auto parts = object.find("parts");
+        if (parts != object.end() && !parts->is_array())
+            return invalid<Shape>(ErrorCode::InvalidTarget, path + ".parts", "parts must be an array");
+        const std::size_t partCount = parts == object.end() ? 0U : parts->size();
+        if (partCount > Limits::MAX_COMPOUND_PARTS)
+            return invalid<Shape>(ErrorCode::ResourceLimited, path + ".parts", "compound part limit exceeded");
+
+        for (std::size_t index = 0; index < partCount; ++index) {
             const auto& part = (*parts)[index];
             const auto partPath = path + ".parts[" + std::to_string(index) + "]";
             if (!part.is_object())
                 return invalid<Shape>(ErrorCode::InvalidTarget, partPath, "compound part must be an object");
-            static const std::set<std::string_view> partFields{"x", "y", "width", "height", "radius"};
+            static const std::set<std::string_view> partFields{
+                "x", "y", "width", "height", "radius", "corner_radii",
+                "junctions", "material_extent", "opacity",
+            };
             if (auto error = rejectUnknown(part, partFields, partPath, ErrorCode::InvalidTarget))
                 return Result<Shape>::failure(std::move(*error));
+
+            json rectObject = {
+                {"x", part.value("x", json())},
+                {"y", part.value("y", json())},
+                {"width", part.value("width", json())},
+                {"height", part.value("height", json())},
+            };
+            auto rect = parseLocalRect(rectObject, partPath);
+            if (!rect)
+                return Result<Shape>::failure(rect.error());
+            auto corners = parseCornerFields(part, partPath);
+            if (!corners)
+                return Result<Shape>::failure(corners.error());
+
             CompoundPart parsed;
-            double       radius = 0.0;
-            for (const auto& [key, destination] : {
-                     std::pair<std::string_view, double*>{"x", &parsed.rect.x},
-                     {"y", &parsed.rect.y},
-                     {"width", &parsed.rect.width},
-                     {"height", &parsed.rect.height},
-                     {"radius", &radius},
-                 }) {
-                const auto value = part.find(key);
-                if (value == part.end() || !value->is_number())
-                    return invalid<Shape>(ErrorCode::InvalidTarget, partPath + "." + std::string(key), "expected a number");
-                *destination = value->get<double>();
-                if (!std::isfinite(*destination))
-                    return invalid<Shape>(ErrorCode::InvalidTarget, partPath + "." + std::string(key), "expected a finite number");
+            parsed.rect = std::move(rect.value());
+            parsed.corners = std::move(corners.value());
+            if (const auto junctions = part.find("junctions"); junctions != part.end()) {
+                auto parsedJunctions = parseCornerRadii(*junctions, partPath + ".junctions");
+                if (!parsedJunctions)
+                    return Result<Shape>::failure(parsedJunctions.error());
+                parsed.junctions = std::move(parsedJunctions.value());
             }
-            parsed.corners = {radius, radius, radius, radius};
+            if (const auto extent = part.find("material_extent"); extent != part.end()) {
+                auto parsedExtent = parseLocalRect(*extent, partPath + ".material_extent");
+                if (!parsedExtent)
+                    return Result<Shape>::failure(parsedExtent.error());
+                parsed.materialExtent = std::move(parsedExtent.value());
+            }
+            if (auto error = assignNumber(
+                    part,
+                    "opacity",
+                    parsed.opacity,
+                    partPath + ".opacity",
+                    ErrorCode::InvalidTarget))
+                return Result<Shape>::failure(std::move(*error));
             shape.parts.push_back(parsed);
         }
+
+        if (const auto connectors = object.find("connectors"); connectors != object.end()) {
+            if (!connectors->is_array())
+                return invalid<Shape>(ErrorCode::InvalidTarget, path + ".connectors", "connectors must be an array");
+            if (connectors->size() > Limits::MAX_COMPOUND_CONNECTORS)
+                return invalid<Shape>(
+                    ErrorCode::ResourceLimited,
+                    path + ".connectors",
+                    "compound connector limit exceeded");
+            for (std::size_t index = 0; index < connectors->size(); ++index) {
+                auto connector = parseLocalRect(
+                    (*connectors)[index],
+                    path + ".connectors[" + std::to_string(index) + "]");
+                if (!connector)
+                    return Result<Shape>::failure(connector.error());
+                shape.connectors.push_back(std::move(connector.value()));
+            }
+        }
+        if (auto error = assignNumber(
+                object,
+                "connector_curve",
+                shape.connectorCurve,
+                path + ".connector_curve",
+                ErrorCode::InvalidTarget))
+            return Result<Shape>::failure(std::move(*error));
         return Result<Shape>::success(std::move(shape));
     }
     return invalid<Shape>(ErrorCode::InvalidTarget, path + ".kind", "unsupported shape kind");

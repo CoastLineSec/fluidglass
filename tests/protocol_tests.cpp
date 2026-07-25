@@ -129,15 +129,79 @@ int main() {
                     "geometry":{"space":"output-logical","x":0,"y":0,"width":1000,"height":800},
                     "stage":"post-windows",
                     "material":{"source":"session","name":"fluid"},
-                    "shape":{"kind":"compound","parts":[
-                        {"x":0,"y":0,"width":1000,"height":44,"radius":22},
-                        {"x":0,"y":756,"width":1000,"height":44,"radius":22}
-                    ]}
+                    "shape":{
+                        "kind":"compound",
+                        "base":{"radius":28},
+                        "cutout":{
+                            "x":32,"y":32,"width":936,"height":736,
+                            "corner_radii":{
+                                "top_left":20,"top_right":20,
+                                "bottom_right":16,"bottom_left":16
+                            }
+                        },
+                        "parts":[
+                            {
+                                "x":0,"y":0,"width":1000,"height":44,"radius":22,
+                                "junctions":{
+                                    "top_left":0,"top_right":8,
+                                    "bottom_right":8,"bottom_left":0
+                                },
+                                "material_extent":{"x":-8,"y":-8,"width":1016,"height":60},
+                                "opacity":0.75
+                            },
+                            {
+                                "x":0,"y":756,"width":1000,"height":44,
+                                "corner_radii":{
+                                    "top_left":14,"top_right":14,
+                                    "bottom_right":22,"bottom_left":22
+                                }
+                            }
+                        ],
+                        "connectors":[
+                            {"x":16,"y":40,"width":12,"height":12}
+                        ],
+                        "connector_curve":7
+                    }
                 }]
             })");
             require(result.hasValue(), "compound target failed");
             const auto& target = std::get<ReplaceSessionRequest>(result.value().body).replacement.targets[0];
-            require(std::get<CompoundShape>(target.shape).parts.size() == 2, "compound parts changed");
+            const auto& shape = std::get<CompoundShape>(target.shape);
+            require(shape.base && shape.base->corners.topLeft == 28.0, "compound base changed");
+            require(shape.cutout && shape.cutout->corners.bottomLeft == 16.0, "compound cutout changed");
+            require(shape.parts.size() == 2, "compound parts changed");
+            require(shape.parts[0].junctions.topRight == 8.0, "compound junction changed");
+            require(shape.parts[0].materialExtent && shape.parts[0].materialExtent->x == -8.0,
+                    "compound material extent changed");
+            require(shape.parts[0].opacity == 0.75, "compound opacity changed");
+            require(shape.parts[1].corners.bottomRight == 22.0, "compound corner radii changed");
+            require(shape.connectors.size() == 1, "compound connectors changed");
+            require(shape.connectorCurve == 7.0, "compound connector curve changed");
+        }},
+        Case{"compound corner authority is unambiguous", [] {
+            const auto result = parseRequest(R"({
+                "version":2,"operation":"session.replace",
+                "session_id":"one","token":"two","generation":1,
+                "materials":{"fluid":{}},
+                "targets":[{
+                    "id":"frame","kind":"region",
+                    "selector":{"output":"DP-1"},
+                    "geometry":{"space":"output-logical","x":0,"y":0,"width":1000,"height":800},
+                    "stage":"post-windows",
+                    "material":{"source":"session","name":"fluid"},
+                    "shape":{"kind":"compound","parts":[{
+                        "x":0,"y":0,"width":1000,"height":44,
+                        "radius":22,
+                        "corner_radii":{
+                            "top_left":22,"top_right":22,
+                            "bottom_right":22,"bottom_left":22
+                        }
+                    }]}
+                }]
+            })");
+            require(!result, "duplicate corner authorities were accepted");
+            require(result.error().path == "targets[0].shape.parts[0]",
+                    "corner-authority failure path changed");
         }},
         Case{"strict material fields", [] {
             const auto wrongType = parseRequest(R"({

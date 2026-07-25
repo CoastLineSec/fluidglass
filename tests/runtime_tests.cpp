@@ -68,6 +68,47 @@ std::string replacement(
         }]})";
 }
 
+std::string compoundReplacement(std::string_view sessionId, std::string_view token) {
+    return std::string(R"({
+        "version":2,
+        "operation":"session.replace",
+        "session_id":")") + std::string(sessionId) +
+        R"(","token":")" + std::string(token) +
+        R"(","generation":1,
+        "materials":{"glass":{}},
+        "targets":[{
+            "id":"frame",
+            "kind":"region",
+            "selector":{"output":"DP-1"},
+            "geometry":{"space":"output-logical","x":0,"y":0,"width":800,"height":600},
+            "stage":"post-windows",
+            "material":{"source":"session","name":"glass"},
+            "shape":{
+                "kind":"compound",
+                "base":{"radius":24},
+                "cutout":{
+                    "x":40,"y":40,"width":720,"height":520,
+                    "corner_radii":{
+                        "top_left":18,"top_right":18,
+                        "bottom_right":14,"bottom_left":14
+                    }
+                },
+                "parts":[{
+                    "x":0,"y":0,"width":800,"height":44,"radius":22,
+                    "junctions":{
+                        "top_left":0,"top_right":7,
+                        "bottom_right":7,"bottom_left":0
+                    },
+                    "material_extent":{"x":-8,"y":-8,"width":816,"height":60},
+                    "opacity":0.75
+                }],
+                "connectors":[{"x":16,"y":40,"width":12,"height":12}],
+                "connector_curve":6
+            }
+        }]
+    })";
+}
+
 } // namespace
 
 int main() {
@@ -78,6 +119,7 @@ int main() {
             require(result["ok"] == true, "capabilities failed");
             require(result["result"]["rendering_ready"] == false, "inert renderer was advertised as ready");
             require(result["result"]["limits"]["request_bytes"] == 262144, "request limit changed");
+            require(result["result"]["limits"]["compound_connectors"] == 32, "connector limit is missing");
         }},
         Case{"session lifecycle and privacy-safe status", [] {
             Fixture fixture;
@@ -131,6 +173,30 @@ int main() {
                 sessionId + R"(","token":"wrong","target_id":"bar"})");
             require(denied["ok"] == false, "wrong inspection token was accepted");
             require(denied["error"]["code"] == "invalid-token", "wrong inspection error code");
+        }},
+        Case{"compound inspection is lossless", [] {
+            Fixture fixture;
+            const auto opened = open(fixture.runtime);
+            const auto sessionId = opened["result"]["session_id"].get<std::string>();
+            const auto token = opened["result"]["token"].get<std::string>();
+            require(call(fixture.runtime, compoundReplacement(sessionId, token))["ok"] == true,
+                    "compound replacement failed");
+
+            const auto inspect = call(fixture.runtime, std::string(
+                R"({"version":2,"operation":"target.inspect","session_id":")") +
+                sessionId + R"(","token":")" + token + R"(","target_id":"frame"})");
+            require(inspect["ok"] == true, "compound inspection failed");
+            const auto& shape = inspect["result"]["target"]["shape"];
+            require(shape["base"]["radius"] == 24, "compound base was not preserved");
+            require(shape["cutout"]["corner_radii"]["bottom_left"] == 14,
+                    "compound cutout corners were not preserved");
+            require(shape["parts"][0]["junctions"]["top_right"] == 7,
+                    "compound junctions were not preserved");
+            require(shape["parts"][0]["material_extent"]["x"] == -8,
+                    "compound material extent was not preserved");
+            require(shape["parts"][0]["opacity"] == 0.75, "compound opacity was not preserved");
+            require(shape["connectors"][0]["width"] == 12, "compound connector was not preserved");
+            require(shape["connector_curve"] == 6, "compound connector curve was not preserved");
         }},
         Case{"config material references use the active snapshot", [] {
             Fixture fixture;
