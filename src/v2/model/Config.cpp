@@ -11,8 +11,6 @@
 namespace hfg::v2 {
 namespace {
 
-constexpr std::size_t MAX_RULES_PER_KIND = 512U;
-
 template <typename T>
 Result<T> invalid(ErrorCode code, std::string path, std::string message) {
     return Result<T>::failure({
@@ -89,9 +87,9 @@ Result<ConfigSnapshot> validateConfig(ConfigSnapshotInput input) {
         return invalid<ConfigSnapshot>(ErrorCode::ResourceLimited, "materials", "material limit exceeded");
     if (!input.materials.contains(input.defaultMaterial))
         return invalid<ConfigSnapshot>(ErrorCode::InvalidMaterial, "default_material", "default material was not found");
-    if (input.windowRules.size() > MAX_RULES_PER_KIND)
+    if (input.windowRules.size() > Limits::MAX_RULES_PER_KIND)
         return invalid<ConfigSnapshot>(ErrorCode::ResourceLimited, "window_rules", "window rule limit exceeded");
-    if (input.layerRules.size() > MAX_RULES_PER_KIND)
+    if (input.layerRules.size() > Limits::MAX_RULES_PER_KIND)
         return invalid<ConfigSnapshot>(ErrorCode::ResourceLimited, "layer_rules", "layer rule limit exceeded");
 
     ConfigSnapshot result{

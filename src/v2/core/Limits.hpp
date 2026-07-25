@@ -13,6 +13,7 @@ struct Limits {
     static constexpr std::size_t MAX_TARGETS_PER_SESSION   = 256U;
     static constexpr std::size_t MAX_DYNAMIC_TARGETS       = 512U;
     static constexpr std::size_t MAX_MATERIALS_PER_OWNER   = 128U;
+    static constexpr std::size_t MAX_RULES_PER_KIND        = 512U;
     static constexpr std::size_t MAX_COMPOUND_PARTS        = 32U;
 
     static constexpr std::uint64_t CLIENT_LEASE_MS         = 15'000U;

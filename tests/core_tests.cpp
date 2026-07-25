@@ -49,6 +49,7 @@ int main() {
             require(Limits::MAX_SESSIONS == 64U, "session limit changed");
             require(Limits::MAX_TARGETS_PER_SESSION == 256U, "per-session target limit changed");
             require(Limits::MAX_DYNAMIC_TARGETS == 512U, "dynamic target limit changed");
+            require(Limits::MAX_RULES_PER_KIND == 512U, "rule limit changed");
             require(Limits::PREVIEW_LEASE_MS < Limits::CLIENT_LEASE_MS, "preview leases must be shorter");
         }},
     });
