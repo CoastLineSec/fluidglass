@@ -10,6 +10,7 @@ find_package(PkgConfig REQUIRED)
 # Hyprland headers (ABI-locked to the running Hyprland). hyprpm provides these
 # for the user's exact version; a manual build uses the system hyprland package.
 pkg_check_modules(HYPRLAND REQUIRED IMPORTED_TARGET hyprland)
+pkg_check_modules(LUA REQUIRED IMPORTED_TARGET lua)
 
 # nlohmann/json is vendored as a self-contained single header (include/), so the
 # only build dependency is the Hyprland headers above — no system json package.
@@ -76,6 +77,21 @@ target_compile_options(hyprfluidglass-v2-core PRIVATE
 )
 target_link_libraries(hyprfluidglass PRIVATE hyprfluidglass-v2-core)
 
+add_library(hyprfluidglass-v2-lua STATIC
+    src/v2/config/LuaConfig.cpp
+)
+target_include_directories(hyprfluidglass-v2-lua PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_link_libraries(hyprfluidglass-v2-lua PUBLIC
+    hyprfluidglass-v2-core
+    PkgConfig::LUA
+)
+target_compile_options(hyprfluidglass-v2-lua PRIVATE
+    -Wall
+    -Wextra
+    -Wpedantic
+    $<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang>:-fno-gnu-unique>
+)
+
 include(CTest)
 if(BUILD_TESTING)
     add_executable(hyprfluidglass-core-tests tests/core_tests.cpp)
@@ -91,6 +107,12 @@ if(BUILD_TESTING)
     target_link_libraries(hyprfluidglass-opaque-id-tests PRIVATE hyprfluidglass-v2-core)
     target_compile_options(hyprfluidglass-opaque-id-tests PRIVATE -Wall -Wextra -Wpedantic)
     add_test(NAME hyprfluidglass-opaque-id COMMAND hyprfluidglass-opaque-id-tests)
+
+    add_executable(hyprfluidglass-lua-config-tests tests/lua_config_tests.cpp)
+    target_include_directories(hyprfluidglass-lua-config-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+    target_link_libraries(hyprfluidglass-lua-config-tests PRIVATE hyprfluidglass-v2-lua)
+    target_compile_options(hyprfluidglass-lua-config-tests PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME hyprfluidglass-lua-config COMMAND hyprfluidglass-lua-config-tests)
 
     add_executable(hyprfluidglass-material-tests tests/material_tests.cpp)
     target_include_directories(hyprfluidglass-material-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests")
