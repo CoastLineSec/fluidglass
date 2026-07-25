@@ -3593,6 +3593,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
                 Event::bus()->m_events.config.preReload.listen(onV2ConfigPreReload);
             g_v2ConfigReloadedListener =
                 Event::bus()->m_events.config.reloaded.listen(onV2ConfigReloaded);
+            HyprlandAPI::reloadConfig();
         }
     }
 
