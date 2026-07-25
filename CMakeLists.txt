@@ -32,6 +32,7 @@ set(HYPRFLUIDGLASS_BUILD_ID "${HYPRFLUIDGLASS_BUILD_TIME}-${HYPRFLUIDGLASS_GIT_C
 add_library(hyprfluidglass SHARED
     src/main.cpp
     src/v2/render/HyprlandCaptureExecutor.cpp
+    src/v2/render/HyprlandCaptureFormat.cpp
     src/v2/render/HyprlandCaptureResource.cpp
     src/v2/render/HyprlandOutputCatalog.cpp
     src/v2/render/HyprlandStateGuard.cpp
@@ -220,6 +221,22 @@ if(BUILD_TESTING)
     target_link_libraries(hyprfluidglass-capture-environment-tests PRIVATE hyprfluidglass-v2-core)
     target_compile_options(hyprfluidglass-capture-environment-tests PRIVATE -Wall -Wextra -Wpedantic)
     add_test(NAME hyprfluidglass-capture-environment COMMAND hyprfluidglass-capture-environment-tests)
+
+    add_executable(
+        hyprfluidglass-hyprland-capture-format-tests
+        tests/hyprland_capture_format_tests.cpp
+        src/v2/render/HyprlandCaptureFormat.cpp
+    )
+    target_include_directories(hyprfluidglass-hyprland-capture-format-tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests"
+    )
+    target_link_libraries(hyprfluidglass-hyprland-capture-format-tests PRIVATE
+        hyprfluidglass-v2-core
+        PkgConfig::HYPRLAND
+    )
+    target_compile_options(hyprfluidglass-hyprland-capture-format-tests PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME hyprfluidglass-hyprland-capture-format COMMAND hyprfluidglass-hyprland-capture-format-tests)
 
     add_executable(hyprfluidglass-capture-blit-tests tests/capture_blit_tests.cpp)
     target_include_directories(hyprfluidglass-capture-blit-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests")
