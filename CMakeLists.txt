@@ -58,6 +58,7 @@ include(CTest)
 if(BUILD_TESTING)
     add_library(hyprfluidglass-v2-core STATIC
         src/v2/model/Material.cpp
+        src/v2/model/Session.cpp
         src/v2/model/Target.cpp
     )
     target_include_directories(hyprfluidglass-v2-core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
@@ -82,4 +83,10 @@ if(BUILD_TESTING)
     target_link_libraries(hyprfluidglass-target-tests PRIVATE hyprfluidglass-v2-core)
     target_compile_options(hyprfluidglass-target-tests PRIVATE -Wall -Wextra -Wpedantic)
     add_test(NAME hyprfluidglass-target COMMAND hyprfluidglass-target-tests)
+
+    add_executable(hyprfluidglass-session-tests tests/session_tests.cpp)
+    target_include_directories(hyprfluidglass-session-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+    target_link_libraries(hyprfluidglass-session-tests PRIVATE hyprfluidglass-v2-core)
+    target_compile_options(hyprfluidglass-session-tests PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME hyprfluidglass-session COMMAND hyprfluidglass-session-tests)
 endif()
