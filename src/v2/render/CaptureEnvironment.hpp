@@ -11,6 +11,7 @@ struct CaptureBudget {
     std::uint32_t maxApronPixels = 0;
     std::uint64_t maxPixels = 0;
     std::uint64_t maxBytes = 0;
+    std::uint64_t maxTotalBytes = 0;
 
     friend bool operator==(
         const CaptureBudget&,

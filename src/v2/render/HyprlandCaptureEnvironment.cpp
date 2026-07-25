@@ -108,6 +108,7 @@ inspectHyprlandCaptureEnvironment(
         return Result<HyprlandCaptureEnvironment>::failure(
             limits.error());
     environment.limits = std::move(limits.value());
+    environment.maxTotalBytes = budget.maxTotalBytes;
     return Result<HyprlandCaptureEnvironment>::success(
         std::move(environment));
 }

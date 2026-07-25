@@ -19,6 +19,7 @@ struct CaptureFormatIssue {
 struct HyprlandCaptureEnvironment {
     std::vector<CaptureFormatLayout> formats;
     CaptureLimits                    limits;
+    std::uint64_t                    maxTotalBytes = 0;
     std::vector<CaptureFormatIssue>  formatIssues;
 };
 

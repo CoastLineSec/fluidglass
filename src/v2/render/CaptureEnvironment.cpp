@@ -53,7 +53,12 @@ Result<CaptureLimits> resolveCaptureLimits(
         return failure(
             ErrorCode::ResourceLimited,
             "budget.max_bytes",
-            "capture byte budget must not be zero");
+            "per-capture byte budget must not be zero");
+    if (budget.maxTotalBytes == 0U)
+        return failure(
+            ErrorCode::ResourceLimited,
+            "budget.max_total_bytes",
+            "total capture byte budget must not be zero");
 
     const auto dimension = std::min(
         maximumTextureDimension,
@@ -80,7 +85,9 @@ Result<CaptureLimits> resolveCaptureLimits(
         .maxBytesPerPixel = maximumBytesPerPixel,
         .maxPixels = maximumPixels,
         .maxBytes = std::min(
-            budget.maxBytes,
+            std::min(
+                budget.maxBytes,
+                budget.maxTotalBytes),
             maximumRepresentableBytes),
     });
 }

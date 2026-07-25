@@ -17,6 +17,7 @@ CaptureBudget budget() {
         .maxApronPixels = 2048,
         .maxPixels = 64U * 1024U * 1024U,
         .maxBytes = 256U * 1024U * 1024U,
+        .maxTotalBytes = 512U * 1024U * 1024U,
     };
 }
 
@@ -74,6 +75,19 @@ int main() {
             require(result.value().maxBytes == 800U,
                     "byte ceiling exceeded representable pixels");
         }},
+        Case{"one capture cannot exceed the total memory budget", [] {
+            auto restricted = budget();
+            restricted.maxBytes = 256U * 1024U * 1024U;
+            restricted.maxTotalBytes = 32U * 1024U * 1024U;
+            const auto result = resolveCaptureLimits(
+                16'384,
+                8,
+                restricted);
+            require(result.hasValue(), "total-bounded environment failed");
+            require(result.value().maxBytes ==
+                        restricted.maxTotalBytes,
+                    "per-capture limit exceeded total memory");
+        }},
         Case{"apron is bounded by the texture dimension", [] {
             auto small = budget();
             small.maxApronPixels = 2048;
@@ -101,6 +115,15 @@ int main() {
             invalid.maxBytes = 0;
             require(!resolveCaptureLimits(1024, 4, invalid),
                     "zero byte budget was accepted");
+            invalid = budget();
+            invalid.maxTotalBytes = 0;
+            const auto missingTotal =
+                resolveCaptureLimits(1024, 4, invalid);
+            require(!missingTotal,
+                    "zero total byte budget was accepted");
+            require(missingTotal.error().path ==
+                        "budget.max_total_bytes",
+                    "wrong total byte budget failure path");
         }},
     });
 }
