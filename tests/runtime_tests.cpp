@@ -100,10 +100,33 @@ std::string compoundReplacement(std::string_view sessionId, std::string_view tok
                         "bottom_right":7,"bottom_left":0
                     },
                     "material_extent":{"x":-8,"y":-8,"width":816,"height":60},
+                    "transition":{
+                        "id":"frame-part-enter-1",
+                        "phase":"enter",
+                        "edge":"top",
+                        "duration_ms":180,
+                        "elapsed_ms":20,
+                        "travel":44,
+                        "protrusion":52,
+                        "easing":[]
+                    },
                     "opacity":0.75
                 }],
                 "connectors":[{"x":16,"y":40,"width":12,"height":12}],
                 "connector_curve":6
+            },
+            "transition":{
+                "id":"frame-enter-1",
+                "phase":"enter",
+                "edge":"bottom",
+                "duration_ms":240,
+                "elapsed_ms":40,
+                "travel":44,
+                "easing":[{
+                    "control1_x":0.2,"control1_y":0,
+                    "control2_x":0.3,"control2_y":1,
+                    "end_x":1,"end_y":1
+                }]
             }
         }]
     })";
@@ -120,6 +143,10 @@ int main() {
             require(result["result"]["rendering_ready"] == false, "inert renderer was advertised as ready");
             require(result["result"]["limits"]["request_bytes"] == 262144, "request limit changed");
             require(result["result"]["limits"]["compound_connectors"] == 32, "connector limit is missing");
+            require(result["result"]["limits"]["bezier_segments"] == 16, "Bezier limit is missing");
+            require(result["result"]["limits"]["transition_ms"] == 60000, "transition limit is missing");
+            require(result["result"]["transitions"]["compound_parts"] == true,
+                    "part transitions are not advertised");
         }},
         Case{"session lifecycle and privacy-safe status", [] {
             Fixture fixture;
@@ -194,9 +221,17 @@ int main() {
                     "compound junctions were not preserved");
             require(shape["parts"][0]["material_extent"]["x"] == -8,
                     "compound material extent was not preserved");
+            require(shape["parts"][0]["transition"]["id"] == "frame-part-enter-1",
+                    "compound part transition was not preserved");
+            require(shape["parts"][0]["transition"]["protrusion"] == 52,
+                    "compound part protrusion was not preserved");
             require(shape["parts"][0]["opacity"] == 0.75, "compound opacity was not preserved");
             require(shape["connectors"][0]["width"] == 12, "compound connector was not preserved");
             require(shape["connector_curve"] == 6, "compound connector curve was not preserved");
+            require(inspect["result"]["target"]["transition"]["id"] == "frame-enter-1",
+                    "target transition was not preserved");
+            require(inspect["result"]["target"]["transition"]["easing"][0]["control1_x"] == 0.2,
+                    "target transition easing was not preserved");
         }},
         Case{"config material references use the active snapshot", [] {
             Fixture fixture;

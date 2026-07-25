@@ -82,7 +82,20 @@ int main() {
                     "geometry":{"space":"output-logical","x":10,"y":20,"width":400,"height":300},
                     "stage":"post-windows",
                     "material":{"source":"session","name":"fluid"},
-                    "shape":{"kind":"rounded-rect","radius":20}
+                    "shape":{"kind":"rounded-rect","radius":20},
+                    "transition":{
+                        "id":"preview-enter-1",
+                        "phase":"enter",
+                        "edge":"bottom",
+                        "duration_ms":240,
+                        "elapsed_ms":40,
+                        "travel":44,
+                        "easing":[{
+                            "control1_x":0.2,"control1_y":0,
+                            "control2_x":0.3,"control2_y":1,
+                            "end_x":1,"end_y":1
+                        }]
+                    }
                 }]
             })");
             require(result.hasValue(), "valid replacement failed");
@@ -91,6 +104,10 @@ int main() {
             require(request.replacement.materials.size() == 1, "material was not parsed");
             require(request.replacement.targets.size() == 1, "target was not parsed");
             require(request.replacement.targets[0].kind == TargetKind::Region, "region kind changed");
+            const auto& transition = request.replacement.targets[0].transition;
+            require(transition && transition->id == "preview-enter-1", "target transition changed");
+            require(transition->edge == TransitionEdge::Bottom, "transition edge changed");
+            require(transition->easing.size() == 1, "transition easing changed");
         }},
         Case{"window and layer targets", [] {
             const auto result = parseRequest(R"({
@@ -147,6 +164,16 @@ int main() {
                                     "bottom_right":8,"bottom_left":0
                                 },
                                 "material_extent":{"x":-8,"y":-8,"width":1016,"height":60},
+                                "transition":{
+                                    "id":"frame-part-enter-1",
+                                    "phase":"enter",
+                                    "edge":"top",
+                                    "duration_ms":180,
+                                    "elapsed_ms":20,
+                                    "travel":44,
+                                    "protrusion":52,
+                                    "easing":[]
+                                },
                                 "opacity":0.75
                             },
                             {
@@ -173,6 +200,11 @@ int main() {
             require(shape.parts[0].junctions.topRight == 8.0, "compound junction changed");
             require(shape.parts[0].materialExtent && shape.parts[0].materialExtent->x == -8.0,
                     "compound material extent changed");
+            require(shape.parts[0].transition &&
+                    shape.parts[0].transition->motion.id == "frame-part-enter-1",
+                    "compound part transition changed");
+            require(shape.parts[0].transition->protrusion == 52.0,
+                    "compound part protrusion changed");
             require(shape.parts[0].opacity == 0.75, "compound opacity changed");
             require(shape.parts[1].corners.bottomRight == 22.0, "compound corner radii changed");
             require(shape.connectors.size() == 1, "compound connectors changed");
@@ -202,6 +234,49 @@ int main() {
             require(!result, "duplicate corner authorities were accepted");
             require(result.error().path == "targets[0].shape.parts[0]",
                     "corner-authority failure path changed");
+        }},
+        Case{"transition bounds are enforced", [] {
+            const auto elapsed = parseRequest(R"({
+                "version":2,"operation":"session.replace",
+                "session_id":"one","token":"two","generation":1,
+                "materials":{"fluid":{}},
+                "targets":[{
+                    "id":"preview","kind":"region",
+                    "selector":{"output":"DP-1"},
+                    "geometry":{"space":"output-logical","x":0,"y":0,"width":100,"height":100},
+                    "stage":"post-windows",
+                    "material":{"source":"session","name":"fluid"},
+                    "shape":{"kind":"rounded-rect","radius":10},
+                    "transition":{
+                        "id":"bad-motion","phase":"exit","edge":"top",
+                        "duration_ms":100,"elapsed_ms":101,"travel":20
+                    }
+                }]
+            })");
+            require(!elapsed, "elapsed transition beyond duration was accepted");
+            require(elapsed.error().path == "targets[0].transition.elapsed_ms",
+                    "elapsed transition failure path changed");
+
+            const auto protrusion = parseRequest(R"({
+                "version":2,"operation":"session.replace",
+                "session_id":"one","token":"two","generation":1,
+                "materials":{"fluid":{}},
+                "targets":[{
+                    "id":"preview","kind":"region",
+                    "selector":{"output":"DP-1"},
+                    "geometry":{"space":"output-logical","x":0,"y":0,"width":100,"height":100},
+                    "stage":"post-windows",
+                    "material":{"source":"session","name":"fluid"},
+                    "shape":{"kind":"rounded-rect","radius":10},
+                    "transition":{
+                        "id":"bad-motion","phase":"exit","edge":"top",
+                        "duration_ms":100,"travel":20,"protrusion":20
+                    }
+                }]
+            })");
+            require(!protrusion, "part-only transition field was accepted on a target");
+            require(protrusion.error().path == "targets[0].transition.protrusion",
+                    "target transition authority failure path changed");
         }},
         Case{"strict material fields", [] {
             const auto wrongType = parseRequest(R"({

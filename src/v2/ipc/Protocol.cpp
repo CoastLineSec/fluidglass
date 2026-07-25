@@ -112,10 +112,14 @@ Result<std::string> requiredString(
     return Result<std::string>::success(result);
 }
 
-Result<std::uint64_t> requiredUnsigned(const json& object, std::string_view key, std::string path) {
+Result<std::uint64_t> requiredUnsigned(
+    const json& object,
+    std::string_view key,
+    std::string path,
+    ErrorCode code = ErrorCode::InvalidRequest) {
     const auto value = object.find(key);
     if (value == object.end())
-        return invalid<std::uint64_t>(ErrorCode::InvalidRequest, std::move(path), "expected an integer");
+        return invalid<std::uint64_t>(code, std::move(path), "expected an integer");
     if (value->is_number_unsigned())
         return Result<std::uint64_t>::success(value->get<std::uint64_t>());
     if (value->is_number_integer()) {
@@ -123,7 +127,7 @@ Result<std::uint64_t> requiredUnsigned(const json& object, std::string_view key,
         if (signedValue >= 0)
             return Result<std::uint64_t>::success(static_cast<std::uint64_t>(signedValue));
     }
-    return invalid<std::uint64_t>(ErrorCode::InvalidRequest, std::move(path), "expected a non-negative integer");
+    return invalid<std::uint64_t>(code, std::move(path), "expected a non-negative integer");
 }
 
 std::optional<Error> assignNumber(
@@ -348,6 +352,121 @@ Result<CornerRadii> parseCornerFields(
     return Result<CornerRadii>::success({value, value, value, value});
 }
 
+Result<Transition> parseTransition(const json& object, std::string path, bool partTransition) {
+    if (!object.is_object())
+        return invalid<Transition>(ErrorCode::InvalidTarget, std::move(path), "transition must be an object");
+    std::set<std::string_view> fields{
+        "id", "phase", "edge", "duration_ms", "elapsed_ms", "travel", "easing",
+    };
+    if (partTransition)
+        fields.insert("protrusion");
+    if (auto error = rejectUnknown(object, fields, path, ErrorCode::InvalidTarget))
+        return Result<Transition>::failure(std::move(*error));
+
+    const auto id = requiredString(object, "id", path + ".id", ErrorCode::InvalidTarget);
+    const auto phase = requiredString(object, "phase", path + ".phase", ErrorCode::InvalidTarget);
+    const auto edge = requiredString(object, "edge", path + ".edge", ErrorCode::InvalidTarget);
+    const auto duration = requiredUnsigned(
+        object,
+        "duration_ms",
+        path + ".duration_ms",
+        ErrorCode::InvalidTarget);
+    if (!id) return Result<Transition>::failure(id.error());
+    if (!phase) return Result<Transition>::failure(phase.error());
+    if (!edge) return Result<Transition>::failure(edge.error());
+    if (!duration) return Result<Transition>::failure(duration.error());
+
+    Transition parsed;
+    parsed.id = id.value();
+    parsed.durationMs = duration.value();
+    if (phase.value() == "enter")
+        parsed.phase = TransitionPhase::Enter;
+    else if (phase.value() == "exit")
+        parsed.phase = TransitionPhase::Exit;
+    else
+        return invalid<Transition>(ErrorCode::InvalidTarget, path + ".phase", "phase must be enter or exit");
+
+    if (edge.value() == "top")
+        parsed.edge = TransitionEdge::Top;
+    else if (edge.value() == "bottom")
+        parsed.edge = TransitionEdge::Bottom;
+    else if (edge.value() == "left")
+        parsed.edge = TransitionEdge::Left;
+    else if (edge.value() == "right")
+        parsed.edge = TransitionEdge::Right;
+    else
+        return invalid<Transition>(
+            ErrorCode::InvalidTarget,
+            path + ".edge",
+            "edge must be top, bottom, left or right");
+
+    if (object.contains("elapsed_ms")) {
+        auto elapsed = requiredUnsigned(
+            object,
+            "elapsed_ms",
+            path + ".elapsed_ms",
+            ErrorCode::InvalidTarget);
+        if (!elapsed)
+            return Result<Transition>::failure(elapsed.error());
+        parsed.elapsedMs = elapsed.value();
+    }
+    if (auto error = assignNumber(
+            object,
+            "travel",
+            parsed.travel,
+            path + ".travel",
+            ErrorCode::InvalidTarget))
+        return Result<Transition>::failure(std::move(*error));
+
+    if (const auto easing = object.find("easing"); easing != object.end()) {
+        if (!easing->is_array())
+            return invalid<Transition>(ErrorCode::InvalidTarget, path + ".easing", "easing must be an array");
+        if (easing->size() > Limits::MAX_BEZIER_SEGMENTS)
+            return invalid<Transition>(
+                ErrorCode::ResourceLimited,
+                path + ".easing",
+                "Bezier segment limit exceeded");
+        static const std::set<std::string_view> segmentFields{
+            "control1_x", "control1_y", "control2_x", "control2_y", "end_x", "end_y",
+        };
+        for (std::size_t index = 0; index < easing->size(); ++index) {
+            const auto& segment = (*easing)[index];
+            const auto segmentPath = path + ".easing[" + std::to_string(index) + "]";
+            if (!segment.is_object())
+                return invalid<Transition>(
+                    ErrorCode::InvalidTarget,
+                    segmentPath,
+                    "Bezier segment must be an object");
+            if (auto error = rejectUnknown(segment, segmentFields, segmentPath, ErrorCode::InvalidTarget))
+                return Result<Transition>::failure(std::move(*error));
+            CubicBezierSegment parsedSegment;
+            for (const auto& [key, destination] : {
+                     std::pair<std::string_view, double*>{"control1_x", &parsedSegment.control1X},
+                     {"control1_y", &parsedSegment.control1Y},
+                     {"control2_x", &parsedSegment.control2X},
+                     {"control2_y", &parsedSegment.control2Y},
+                     {"end_x", &parsedSegment.endX},
+                     {"end_y", &parsedSegment.endY},
+                 }) {
+                const auto value = segment.find(key);
+                if (value == segment.end() || !value->is_number())
+                    return invalid<Transition>(
+                        ErrorCode::InvalidTarget,
+                        segmentPath + "." + std::string(key),
+                        "expected a number");
+                *destination = value->get<double>();
+                if (!std::isfinite(*destination))
+                    return invalid<Transition>(
+                        ErrorCode::InvalidTarget,
+                        segmentPath + "." + std::string(key),
+                        "expected a finite number");
+            }
+            parsed.easing.push_back(parsedSegment);
+        }
+    }
+    return Result<Transition>::success(std::move(parsed));
+}
+
 Result<Shape> parseShape(const json& object, std::string path) {
     if (!object.is_object())
         return invalid<Shape>(ErrorCode::InvalidTarget, std::move(path), "shape must be an object");
@@ -437,7 +556,7 @@ Result<Shape> parseShape(const json& object, std::string path) {
                 return invalid<Shape>(ErrorCode::InvalidTarget, partPath, "compound part must be an object");
             static const std::set<std::string_view> partFields{
                 "x", "y", "width", "height", "radius", "corner_radii",
-                "junctions", "material_extent", "opacity",
+                "junctions", "material_extent", "transition", "opacity",
             };
             if (auto error = rejectUnknown(part, partFields, partPath, ErrorCode::InvalidTarget))
                 return Result<Shape>::failure(std::move(*error));
@@ -469,6 +588,23 @@ Result<Shape> parseShape(const json& object, std::string path) {
                 if (!parsedExtent)
                     return Result<Shape>::failure(parsedExtent.error());
                 parsed.materialExtent = std::move(parsedExtent.value());
+            }
+            if (const auto transition = part.find("transition"); transition != part.end()) {
+                auto motion = parseTransition(*transition, partPath + ".transition", true);
+                if (!motion)
+                    return Result<Shape>::failure(motion.error());
+                double protrusion = motion.value().travel;
+                if (auto error = assignNumber(
+                        *transition,
+                        "protrusion",
+                        protrusion,
+                        partPath + ".transition.protrusion",
+                        ErrorCode::InvalidTarget))
+                    return Result<Shape>::failure(std::move(*error));
+                parsed.transition = PartTransition{
+                    .motion = std::move(motion.value()),
+                    .protrusion = protrusion,
+                };
             }
             if (auto error = assignNumber(
                     part,
@@ -547,7 +683,7 @@ Result<Target> parseTarget(const json& object, std::size_t index) {
     if (!object.is_object())
         return invalid<Target>(ErrorCode::InvalidTarget, path, "target must be an object");
     static const std::set<std::string_view> fields{
-        "id", "kind", "selector", "geometry", "stage", "material", "shape", "enabled",
+        "id", "kind", "selector", "geometry", "stage", "material", "shape", "transition", "enabled",
     };
     if (auto error = rejectUnknown(object, fields, path, ErrorCode::InvalidTarget))
         return Result<Target>::failure(std::move(*error));
@@ -585,6 +721,12 @@ Result<Target> parseTarget(const json& object, std::size_t index) {
         if (!enabled->is_boolean())
             return invalid<Target>(ErrorCode::InvalidTarget, path + ".enabled", "expected a boolean");
         input.enabled = enabled->get<bool>();
+    }
+    if (const auto transition = object.find("transition"); transition != object.end()) {
+        auto parsed = parseTransition(*transition, path + ".transition", false);
+        if (!parsed)
+            return Result<Target>::failure(parsed.error());
+        input.transition = std::move(parsed.value());
     }
 
     if (kind.value() == "window") {

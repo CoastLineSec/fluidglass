@@ -40,6 +40,45 @@ std::string_view renderStageName(RenderStage stage) {
     return "post-windows";
 }
 
+std::string_view transitionPhaseName(TransitionPhase phase) {
+    return phase == TransitionPhase::Exit ? "exit" : "enter";
+}
+
+std::string_view transitionEdgeName(TransitionEdge edge) {
+    switch (edge) {
+        case TransitionEdge::Top:    return "top";
+        case TransitionEdge::Bottom: return "bottom";
+        case TransitionEdge::Left:   return "left";
+        case TransitionEdge::Right:  return "right";
+    }
+    return "top";
+}
+
+json transitionJson(const Transition& transition, std::optional<double> protrusion = std::nullopt) {
+    json easing = json::array();
+    for (const auto& segment : transition.easing)
+        easing.push_back({
+            {"control1_x", segment.control1X},
+            {"control1_y", segment.control1Y},
+            {"control2_x", segment.control2X},
+            {"control2_y", segment.control2Y},
+            {"end_x", segment.endX},
+            {"end_y", segment.endY},
+        });
+    json result{
+        {"id", transition.id},
+        {"phase", transitionPhaseName(transition.phase)},
+        {"edge", transitionEdgeName(transition.edge)},
+        {"duration_ms", transition.durationMs},
+        {"elapsed_ms", transition.elapsedMs},
+        {"travel", transition.travel},
+        {"easing", std::move(easing)},
+    };
+    if (protrusion)
+        result["protrusion"] = *protrusion;
+    return result;
+}
+
 json materialReferenceJson(const MaterialReference& reference) {
     return {
         {"source", reference.source == MaterialSource::Config ? "config" : "session"},
@@ -115,6 +154,10 @@ json shapeJson(const Shape& shape) {
                     serialized["junctions"] = cornerRadiiJson(part.junctions);
                 if (part.materialExtent)
                     serialized["material_extent"] = localRectJson(*part.materialExtent);
+                if (part.transition)
+                    serialized["transition"] = transitionJson(
+                        part.transition->motion,
+                        part.transition->protrusion);
                 if (part.opacity != 1.0)
                     serialized["opacity"] = part.opacity;
                 parts.push_back(std::move(serialized));
@@ -179,6 +222,8 @@ json targetJson(const Target& target) {
     }
     if (target.stage)
         result["stage"] = renderStageName(*target.stage);
+    if (target.transition)
+        result["transition"] = transitionJson(*target.transition);
     return result;
 }
 
@@ -217,6 +262,10 @@ json capabilitiesJson() {
         {"rendering_ready", false},
         {"target_kinds", json::array({"window", "layer", "region"})},
         {"shapes", json::array({"rounded-rect", "ring", "compound"})},
+        {"transitions", {
+            {"targets", true},
+            {"compound_parts", true},
+        }},
         {"render_stages", json::array({"post-wallpaper", "pre-window", "post-windows", "post-layer"})},
         {"operations", json::array({
             "capabilities",
@@ -238,6 +287,8 @@ json capabilitiesJson() {
             {"materials_per_owner", Limits::MAX_MATERIALS_PER_OWNER},
             {"compound_parts", Limits::MAX_COMPOUND_PARTS},
             {"compound_connectors", Limits::MAX_COMPOUND_CONNECTORS},
+            {"bezier_segments", Limits::MAX_BEZIER_SEGMENTS},
+            {"transition_ms", Limits::MAX_TRANSITION_MS},
         }},
     };
 }
