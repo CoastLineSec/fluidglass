@@ -91,6 +91,7 @@ Response fields include:
   "version": 2,
   "result": {
     "protocol_versions": [2],
+    "rendering_ready": true,
     "target_kinds": ["window", "layer", "region"],
     "shapes": ["rounded-rect", "ring", "compound"],
     "operations": [
@@ -117,7 +118,8 @@ Response fields include:
 ```
 
 Clients must query capabilities instead of inferring feature support from the
-plugin build version.
+plugin build version. `rendering_ready` is `false` while the v2 control plane is
+available but the v2 renderer is not accepting live presentations.
 
 ## Opening a session
 
@@ -416,6 +418,20 @@ are invalid.
 A heartbeat renews the lease only when the token and current generation match.
 It does not alter materials or targets. When a lease expires, the plugin
 detaches the session and emits an `expired` readiness event.
+
+Successful result:
+
+```json
+{
+  "session_id": "opaque-session-id",
+  "generation": 1,
+  "lease_ms": 15000,
+  "expires_at_ms": 123471789
+}
+```
+
+The ownership token is returned only when the session opens. Heartbeat, status,
+replacement, and close responses do not repeat it.
 
 Clients should heartbeat well before the deadline and open a new session after
 Hyprland or the plugin reloads.
