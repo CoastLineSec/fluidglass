@@ -14,6 +14,10 @@ Modes:
                                    stdout (env info + snapshots + events over
                                    SEC seconds, default 8) — attach to issues
 
+Surface selectors and event details are redacted by default. Pass
+--include-identities only when those values are required and the output will be
+reviewed before sharing.
+
 Python 3 stdlib only; requires a running Hyprland session with the plugin loaded.
 """
 
@@ -40,8 +44,9 @@ def hyprctl(*args, parse_json=True):
         return None
 
 
-def fetch():
-    data = hyprctl("hyprfluidglass-debug-json")
+def fetch(include_identities=False):
+    command = "hyprfluidglass-debug-json-verbose" if include_identities else "hyprfluidglass-debug-json"
+    data = hyprctl(command)
     if data is None:
         sys.exit("hyprfluidglass plugin not loaded (hyprfluidglass-debug-json returned no JSON)")
     return data
@@ -116,11 +121,11 @@ def print_events(events, since_seq, term_width):
     return max((e["seq"] for e in events), default=since_seq)
 
 
-def mode_live(interval, once=False):
+def mode_live(interval, once=False, include_identities=False):
     last_seq = 0
     first = True
     while True:
-        data = fetch()
+        data = fetch(include_identities)
         width = shutil.get_terminal_size((120, 40)).columns
         if once:
             print_table(data, width)
@@ -147,19 +152,32 @@ def mode_live(interval, once=False):
         time.sleep(interval)
 
 
-def mode_report(seconds):
+def sanitize_monitors(monitors):
+    allowed = {
+        "id", "name", "x", "y", "width", "height", "refreshRate", "scale",
+        "transform", "activeWorkspace", "specialWorkspace", "focused",
+        "dpmsStatus", "vrr", "activelyTearing", "disabled",
+    }
+    return [
+        {key: value for key, value in monitor.items() if key in allowed}
+        for monitor in (monitors or [])
+        if isinstance(monitor, dict)
+    ]
+
+
+def mode_report(seconds, include_identities=False):
     bundle = {
         "tool": "hyprfluidglass-debug",
         "capturedAt": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "hyprlandVersion": hyprctl("version", "-j"),
-        "monitors": hyprctl("monitors", "-j"),
+        "monitors": sanitize_monitors(hyprctl("monitors", "-j")),
         "snapshots": [],
     }
     t0 = time.time()
-    bundle["snapshots"].append(fetch())
+    bundle["snapshots"].append(fetch(include_identities))
     while time.time() - t0 < seconds:
         time.sleep(min(2.0, max(0.1, seconds - (time.time() - t0))))
-        bundle["snapshots"].append(fetch())
+        bundle["snapshots"].append(fetch(include_identities))
     # the last snapshot's ring is the authoritative event history
     bundle["events"] = bundle["snapshots"][-1]["events"]
     for s in bundle["snapshots"]:
@@ -175,17 +193,22 @@ def main():
     ap.add_argument("--report", nargs="?", const=8.0, type=float, metavar="SEC",
                     help="capture a bug-report bundle over SEC seconds (default 8) to stdout")
     ap.add_argument("--interval", type=float, default=0.25, help="live refresh interval (default 0.25s)")
+    ap.add_argument(
+        "--include-identities",
+        action="store_true",
+        help="include raw surface selectors and event details; review before sharing",
+    )
     args = ap.parse_args()
 
     if args.json:
-        print(json.dumps(fetch(), indent=2))
+        print(json.dumps(fetch(args.include_identities), indent=2))
     elif args.report is not None:
-        mode_report(args.report)
+        mode_report(args.report, args.include_identities)
     elif args.once:
-        mode_live(args.interval, once=True)
+        mode_live(args.interval, once=True, include_identities=args.include_identities)
     else:
         try:
-            mode_live(args.interval)
+            mode_live(args.interval, include_identities=args.include_identities)
         except KeyboardInterrupt:
             pass
 
