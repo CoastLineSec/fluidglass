@@ -75,6 +75,7 @@ add_library(hyprfluidglass-v2-core STATIC
     src/v2/render/CaptureCache.cpp
     src/v2/render/CapturePlan.cpp
     src/v2/render/Geometry.cpp
+    src/v2/render/MaterialSampling.cpp
     src/v2/render/OutputGeneration.cpp
     src/v2/runtime/Runtime.cpp
     src/v2/targets/Attachment.cpp
@@ -144,6 +145,12 @@ if(BUILD_TESTING)
     target_link_libraries(hyprfluidglass-material-tests PRIVATE hyprfluidglass-v2-core)
     target_compile_options(hyprfluidglass-material-tests PRIVATE -Wall -Wextra -Wpedantic)
     add_test(NAME hyprfluidglass-material COMMAND hyprfluidglass-material-tests)
+
+    add_executable(hyprfluidglass-material-sampling-tests tests/material_sampling_tests.cpp)
+    target_include_directories(hyprfluidglass-material-sampling-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+    target_link_libraries(hyprfluidglass-material-sampling-tests PRIVATE hyprfluidglass-v2-core)
+    target_compile_options(hyprfluidglass-material-sampling-tests PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME hyprfluidglass-material-sampling COMMAND hyprfluidglass-material-sampling-tests)
 
     add_executable(hyprfluidglass-target-tests tests/target_tests.cpp)
     target_include_directories(hyprfluidglass-target-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests")
