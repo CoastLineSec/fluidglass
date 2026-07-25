@@ -32,8 +32,8 @@ Render resources additionally use an internal output generation. A new
 generation is created when any render-relevant property changes:
 
 - output object replacement or hotplug;
-- mode or buffer size;
-- logical size;
+- mode identity or buffer size;
+- logical position or size;
 - scale;
 - transform;
 - render format or color-management state.
@@ -41,6 +41,12 @@ generation is created when any render-relevant property changes:
 Capture textures, framebuffers, cached geometry, and readiness belong to one
 generation. Retiring a generation releases its resources and detaches its
 presentations before a replacement is considered capture-ready.
+
+Generations increase independently for each connector name and are not reused
+when an output is removed and later re-added. The internal output snapshot
+contains an adapter-provided output-object token and mode token in addition to
+the public connector name, so a replacement object or same-size mode change
+cannot accidentally inherit old GPU resources.
 
 ## Fractional scaling
 
@@ -76,9 +82,24 @@ All eight Wayland output transforms are supported:
 - flipped 180 degrees;
 - flipped 270 degrees.
 
-Geometry and backdrop UVs use one authoritative transform path. A transform is
-not applied manually to UVs when the compositor projection has already applied
-the equivalent mapping.
+Wayland defines the transform from framebuffer space to output-oriented space.
+Client geometry starts in output-oriented logical space, so buffer coverage
+uses the inverse transform. Geometry and backdrop UVs use that one
+authoritative path. A transform is not applied manually to UVs when the
+compositor projection has already applied the equivalent mapping.
+
+The mapping order is:
+
+1. Clip the global logical rectangle to the output's global logical bounds.
+2. Subtract the output origin.
+3. Apply the output scale once.
+4. Apply the inverse Wayland output transform.
+5. Clamp to the framebuffer and derive outside-preserving integer coverage.
+
+The mapper retains the transformed positions of the target's semantic
+top-left, top-right, bottom-right, and bottom-left corners. Rotation or
+reflection therefore cannot silently exchange corner radii or lighting
+orientation.
 
 For every transform:
 
@@ -217,4 +238,3 @@ A presentation reaches `drawn` only after:
 
 Request acceptance, attachment creation, damage submission, and render-pass
 queueing are not draw acknowledgements.
-
