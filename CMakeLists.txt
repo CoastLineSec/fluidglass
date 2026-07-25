@@ -31,6 +31,7 @@ set(HYPRFLUIDGLASS_BUILD_ID "${HYPRFLUIDGLASS_BUILD_TIME}-${HYPRFLUIDGLASS_GIT_C
 
 add_library(hyprfluidglass SHARED
     src/main.cpp
+    src/v2/render/HyprlandCaptureExecutor.cpp
     src/v2/render/HyprlandCaptureResource.cpp
     src/v2/render/HyprlandStateGuard.cpp
 )
