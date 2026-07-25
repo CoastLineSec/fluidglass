@@ -92,7 +92,7 @@ Response fields include:
   "version": 2,
   "result": {
     "protocol_versions": [2],
-    "rendering_ready": true,
+    "rendering_ready": false,
     "target_kinds": ["window", "layer", "region"],
     "shapes": ["rounded-rect", "ring", "compound"],
     "transitions": {
