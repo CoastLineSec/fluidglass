@@ -53,6 +53,7 @@ Result<std::unique_ptr<HyprlandStateGuard>> unavailable(
 struct HyprlandStateGuard::Snapshot {
     SP<Render::IFramebuffer> framebuffer;
     SP<CShader>              shader;
+    GLint                    readFramebuffer = 0;
     Render::eRenderProjectionType projectionType = Render::RPT_MONITOR;
     Vector2D                 framebufferSize;
     bool                     transformDamage = true;
@@ -124,6 +125,7 @@ Result<std::unique_ptr<HyprlandStateGuard>> HyprlandStateGuard::capture(
     auto snapshot = std::make_unique<Snapshot>();
     snapshot->framebuffer = g_pHyprRenderer->m_renderData.currentFB;
     snapshot->shader = std::move(shader);
+    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &snapshot->readFramebuffer);
     snapshot->projectionType = g_pHyprRenderer->m_renderData.projectionType;
     snapshot->framebufferSize = g_pHyprRenderer->m_renderData.fbSize;
     snapshot->transformDamage = g_pHyprRenderer->m_renderData.transformDamage;
@@ -175,6 +177,9 @@ Result<void> HyprlandStateGuard::restore() {
         });
 
     g_pHyprRenderer->bindFB(m_snapshot->framebuffer);
+    glBindFramebuffer(
+        GL_READ_FRAMEBUFFER,
+        static_cast<GLuint>(m_snapshot->readFramebuffer));
     g_pHyprRenderer->m_renderData.fbSize = m_snapshot->framebufferSize;
     g_pHyprRenderer->m_renderData.transformDamage = m_snapshot->transformDamage;
     g_pHyprRenderer->setProjectionType(m_snapshot->projectionType);
