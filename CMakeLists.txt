@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 project(hyprfluidglass VERSION 0.1.0 LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 26)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -34,7 +34,12 @@ add_library(hyprfluidglass SHARED
 
 target_include_directories(hyprfluidglass PRIVATE ${HYPRFLUIDGLASS_JSON_INCLUDE})
 target_link_libraries(hyprfluidglass PRIVATE PkgConfig::HYPRLAND)
-target_compile_options(hyprfluidglass PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(hyprfluidglass PRIVATE
+    -Wall
+    -Wextra
+    -Wpedantic
+    $<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang>:-fno-gnu-unique>
+)
 target_compile_definitions(hyprfluidglass PRIVATE
     HYPRFLUIDGLASS_PLUGIN_VERSION="${PROJECT_VERSION}"
     HYPRFLUIDGLASS_BUILD_ID="${HYPRFLUIDGLASS_BUILD_ID}"
