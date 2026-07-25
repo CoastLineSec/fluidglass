@@ -39,6 +39,7 @@ Target target(std::string id, MaterialSource source, std::string materialName) {
         .selector = RegionSelector{.output = "DP-1"},
         .geometry = Rect{.x = 0.0, .y = 0.0, .width = 100.0, .height = 80.0},
         .stage = RenderStage::PostWindows,
+        .transition = std::nullopt,
     });
     if (!result)
         throw hfg::test::Failure("test target failed validation");
