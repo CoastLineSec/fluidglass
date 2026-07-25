@@ -11,16 +11,18 @@ project [README](../README.md).
 
 ## V2 reference
 
-The v2 interface is documented before its release so shell and integration
-authors can build against a stable contract:
+The v2 control plane and Lua configuration entry point are available in current
+development builds. The renderer contract is published so shell and
+integration authors can prepare against the same versioned interface:
 
 - [Architecture](architecture/v2-overview.md)
 - [Rendering and geometry](architecture/rendering-contract.md)
 - [Lua configuration](reference/lua-configuration.md)
 - [Runtime protocol](reference/runtime-protocol.md)
 
-Pages marked as planned describe the v2 contract and are not available through
-the current release.
+Check `capabilities.rendering_ready` before expecting a v2 target to draw. A
+`false` value means the control plane can validate and retain state while the
+v2 renderer remains inactive.
 
 ## Integration guides
 
@@ -28,7 +30,7 @@ Quickshell, AGS, and generic-client guides will use the same runtime protocol.
 Framework names are client conventions and do not receive special behavior
 inside the plugin.
 
-Integration guides will be added when the v2 runtime API is available for
+Integration guides will be added when the v2 renderer is available for live
 testing.
 
 ## Project boundary
@@ -41,4 +43,3 @@ not:
 - host or distribute shell add-ons;
 - monitor whether applications are responding;
 - provide a security sandbox between processes running as the same user.
-

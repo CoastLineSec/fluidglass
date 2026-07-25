@@ -1,11 +1,29 @@
 # Lua configuration reference
 
-Availability: planned for HyprFluidGlass v2; not available in the current
-release.
+Availability: the native v2 Lua configuration entry point is available in
+current development builds. The v2 renderer remains inactive until
+`capabilities.rendering_ready` reports `true`.
 
 HyprFluidGlass v2 uses Hyprland's native Lua configuration API for durable
 materials and attachment rules. Runtime shells should use the session API
 instead of rewriting durable configuration.
+
+The entry point is registered only when Hyprland is using a Lua configuration.
+Legacy `hyprland.conf` users can still use the runtime protocol, but cannot
+declare durable rules through this Lua interface.
+
+Guard the call so the first configuration pass can complete before a plugin
+manager has loaded HyprFluidGlass:
+
+```lua
+local hfg = hl.plugin.hyprfluidglass
+if hfg then
+    hfg.configure(snapshot)
+end
+```
+
+After the plugin registers the entry point, it queues one reload. The guarded
+call then runs during that reload.
 
 ## Entry point
 
@@ -20,22 +38,27 @@ merging partial tables.
 ## Minimal configuration
 
 ```lua
-hl.plugin.hyprfluidglass.configure({
-    version = 2,
-    enabled = true,
-    default_material = "fluid",
-    materials = {
-        fluid = {},
-    },
-    window_rules = {},
-    layer_rules = {},
-})
+local hfg = hl.plugin.hyprfluidglass
+if hfg then
+    hfg.configure({
+        version = 2,
+        enabled = true,
+        default_material = "fluid",
+        materials = {
+            fluid = {},
+        },
+        window_rules = {},
+        layer_rules = {},
+    })
+end
 ```
 
 ## Complete example
 
 ```lua
-hl.plugin.hyprfluidglass.configure({
+local hfg = hl.plugin.hyprfluidglass
+if hfg then
+    hfg.configure({
     version = 2,
     enabled = true,
     default_material = "fluid",
@@ -96,7 +119,8 @@ hl.plugin.hyprfluidglass.configure({
             enabled = true,
         },
     },
-})
+    })
+end
 ```
 
 ## Snapshot fields
@@ -126,8 +150,9 @@ Configuration reloads are fail-safe:
 4. If no valid v2 snapshot was received, the last known-good configuration
    remains active.
 
-An invalid reload is reported in plugin status and logs. It never clears the
-currently working configuration.
+An invalid `configure()` call becomes a Hyprland Lua configuration error. The
+same failure remains available as `config.last_reload_error` in the v2
+`status` response. It never clears the currently working configuration.
 
 ## Material definitions
 
@@ -263,32 +288,29 @@ Durable rules are evaluated in array order:
 Configuration authorities remain separate. A runtime replacement cannot delete
 or mutate a durable rule.
 
-## Validation result
+## Return and errors
 
-`configure()` returns a structured Lua result:
-
-```lua
-{
-    ok = true,
-    version = 2,
-    material_count = 2,
-    window_rule_count = 1,
-    layer_rule_count = 1,
-}
-```
-
-On failure:
+`configure()` returns `true` after the complete snapshot has been decoded,
+validated, and staged:
 
 ```lua
-{
-    ok = false,
-    error = {
-        code = "invalid-material",
-        path = "materials.fluid.tint_color",
-        message = "expected #RRGGBB",
-    },
-}
+local accepted = hl.plugin.hyprfluidglass.configure(snapshot)
 ```
 
-The error path identifies the rejected field without echoing unrelated
-configuration or sensitive window metadata.
+Invalid input raises a Lua configuration error containing the rejected field
+path and a concise reason:
+
+```text
+materials.fluid.tint_color: expected #RRGGBB
+```
+
+The error does not echo unrelated configuration or sensitive window metadata.
+Hyprland contains the callback error and completes its reload lifecycle; the
+plugin then keeps the previous active snapshot.
+
+The retained result can be inspected without exposing session tokens:
+
+```sh
+hyprctl -j hyprfluidglass \
+  '{"version":2,"operation":"status"}'
+```

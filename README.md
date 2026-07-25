@@ -98,7 +98,8 @@ v2 capability response reports `rendering_ready: true`.
 
 See the [runtime protocol reference](docs/reference/runtime-protocol.md) for
 session-based v2 requests. Clients must query `capabilities` before submitting
-v2 render targets.
+v2 render targets. Durable v2 materials and application/layer attachment rules
+use the [native Lua configuration interface](docs/reference/lua-configuration.md).
 
 ### Apply payload
 
