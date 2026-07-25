@@ -18,6 +18,7 @@ struct Limits {
     static constexpr std::size_t MAX_COMPOUND_PARTS        = 32U;
     static constexpr std::size_t MAX_COMPOUND_CONNECTORS   = 32U;
     static constexpr std::size_t MAX_BEZIER_SEGMENTS       = 16U;
+    static constexpr std::uint32_t MAX_OUTPUT_BUFFER_DIMENSION = 65'536U;
 
     static constexpr std::uint64_t CLIENT_LEASE_MS         = 15'000U;
     static constexpr std::uint64_t PREVIEW_LEASE_MS        = 5'000U;

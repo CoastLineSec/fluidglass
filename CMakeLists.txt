@@ -63,6 +63,7 @@ add_library(hyprfluidglass-v2-core STATIC
     src/v2/model/Readiness.cpp
     src/v2/model/Session.cpp
     src/v2/model/Target.cpp
+    src/v2/render/OutputGeneration.cpp
     src/v2/runtime/Runtime.cpp
 )
 target_include_directories(hyprfluidglass-v2-core PUBLIC
@@ -144,6 +145,12 @@ if(BUILD_TESTING)
     target_link_libraries(hyprfluidglass-readiness-tests PRIVATE hyprfluidglass-v2-core)
     target_compile_options(hyprfluidglass-readiness-tests PRIVATE -Wall -Wextra -Wpedantic)
     add_test(NAME hyprfluidglass-readiness COMMAND hyprfluidglass-readiness-tests)
+
+    add_executable(hyprfluidglass-output-generation-tests tests/output_generation_tests.cpp)
+    target_include_directories(hyprfluidglass-output-generation-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+    target_link_libraries(hyprfluidglass-output-generation-tests PRIVATE hyprfluidglass-v2-core)
+    target_compile_options(hyprfluidglass-output-generation-tests PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME hyprfluidglass-output-generation COMMAND hyprfluidglass-output-generation-tests)
 
     add_executable(hyprfluidglass-protocol-tests tests/protocol_tests.cpp)
     target_include_directories(hyprfluidglass-protocol-tests PRIVATE
