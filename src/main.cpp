@@ -1440,17 +1440,17 @@ BlurResult blurElementBackdrop(const GlassElement& el, const SP<Render::ITexture
 }
 
 // ── Draw one glass element ────────────────────────────────────────────────
-void drawElement(const GlassElement& el, const SP<Render::ITexture>& capture) {
-    if (!g_pHyprRenderer || !capture || !capture->ok()) return;
-    if (!ensureShader()) return;
+bool drawElement(const GlassElement& el, const SP<Render::ITexture>& capture) {
+    if (!g_pHyprRenderer || !capture || !capture->ok()) return false;
+    if (!ensureShader()) return false;
     const auto monitor = g_pHyprRenderer->renderData().pMonitor.lock();
-    if (!monitor || monitor->m_scale <= 0) return;
+    if (!monitor || monitor->m_scale <= 0) return false;
 
     const double scale = monitor->m_scale;
     const int    tf    = static_cast<int>(monitor->m_transform);
     const double cw    = capture->m_size.x;
     const double ch    = capture->m_size.y;
-    if (cw <= 0 || ch <= 0 || el.w <= 0 || el.h <= 0) return;
+    if (cw <= 0 || ch <= 0 || el.w <= 0 || el.h <= 0) return false;
 
     // Enter/exit animation: shrink around the centre by animScale (radius + material
     // scale with it, so the whole glass grows/shrinks coherently); fade via uAlpha.
@@ -1480,7 +1480,7 @@ void drawElement(const GlassElement& el, const SP<Render::ITexture>& capture) {
     CBox box(dx, dy, dw, dh);
     CRegion overlap{g_pHyprRenderer->m_renderData.damage};
     overlap.intersect(box.x, box.y, box.width, box.height);
-    if (overlap.empty()) return;      // backdrop under the glass didn't change -> keep last frame
+    if (overlap.empty()) return false; // backdrop under the glass didn't change
     CRegion boxRegion{box};
 
     CBox projected = box;
@@ -1508,7 +1508,7 @@ void drawElement(const GlassElement& el, const SP<Render::ITexture>& capture) {
     }
 
     auto shader = Render::GL::g_pHyprOpenGL->useShader(g_shader);
-    if (!shader || shader->program() == 0) return;
+    if (!shader || shader->program() == 0) return false;
 
     glActiveTexture(GL_TEXTURE0);
     capture->bind();
@@ -1659,9 +1659,11 @@ void drawElement(const GlassElement& el, const SP<Render::ITexture>& capture) {
     // Redraw the WHOLE element whenever any of its backdrop changed, so the
     // frost/refraction recompute consistently (no left-behind window edges).
     Render::GL::g_pHyprOpenGL->blend(true);
-    boxRegion.forEachRect([](const auto& rect) {
+    bool drew = false;
+    boxRegion.forEachRect([&drew](const auto& rect) {
         Render::GL::g_pHyprOpenGL->scissor(&rect, g_pHyprRenderer->m_renderData.transformDamage);
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+        drew = true;
     });
     Render::GL::g_pHyprOpenGL->scissor(nullptr);
     glBindVertexArray(0);
@@ -1671,6 +1673,7 @@ void drawElement(const GlassElement& el, const SP<Render::ITexture>& capture) {
         glActiveTexture(GL_TEXTURE0);
     }
     capture->unbind();
+    return drew;
 }
 
 // ── Render-pass injection ─────────────────────────────────────────────────
@@ -1731,7 +1734,32 @@ class CGlassPass : public IPassElement {
     }
     CRegion opaqueRegion() override { return {}; }
     std::vector<UP<IPassElement>> draw() override {
-        drawElement(m_el, m_holder ? m_holder->tex : nullptr);
+        if (!drawElement(m_el, m_holder ? m_holder->tex : nullptr))
+            return {};
+
+        const auto monitor = g_pHyprRenderer ? g_pHyprRenderer->renderData().pMonitor.lock() : nullptr;
+        if (!monitor)
+            return {};
+
+        std::lock_guard guard(g_stateMutex);
+        const auto      it = g_elements.find(m_el.id);
+        if (it == g_elements.end() || it->second.rev != m_el.rev)
+            return {};
+
+        auto& live = it->second;
+        if (!live.wasDrawn)
+            dbgLog(m_el.id, "draw.start", m_el.lastDrawCause + " on " + monitor->m_name);
+        if (live.drawnRev != live.rev || live.drawnEpoch != g_drawEpoch)
+            g_glassDirty = true;
+        live.wasDrawn      = true;
+        live.drawnRev      = live.rev;
+        live.drawnEpoch    = g_drawEpoch;
+        live.lastGX        = monitor->m_position.x + m_el.x;
+        live.lastGY        = monitor->m_position.y + m_el.y;
+        live.lastGW        = m_el.w;
+        live.lastGH        = m_el.h;
+        live.lastDrawCause = m_el.lastDrawCause;
+        ++live.drawCount;
         return {};
     }
   private:
@@ -2352,15 +2380,6 @@ void renderFluidGlass(eRenderStage stage) {
                 const bool drawNow   = need && el.renderAlpha > 0.003;
                 if (drawNow) {
                     const char* cause = animActive ? "anim" : smoothingActive ? "smooth" : external ? "external" : "echo";
-                    if (!el0.wasDrawn)
-                        dbgLog(id, "draw.start", std::string(cause) + " on " + monitor->m_name);
-                    // P4 successful-draw: this revision was included in a real
-                    // compositor render. A draw-confirm edge (first draw, or a new
-                    // rev confirming) marks the readiness channel dirty.
-                    if (el0.drawnRev != el0.rev || el0.drawnEpoch != g_drawEpoch)
-                        g_glassDirty = true;
-                    el0.drawnRev = el0.rev;
-                    el0.drawnEpoch = g_drawEpoch;
                     // Geometry in motion: also clear the PREVIOUS footprint, or a
                     // shrinking/moving glass leaves a trail of its old pixels.
                     if (propagate && el0.wasDrawn) {
@@ -2369,17 +2388,13 @@ void renderFluidGlass(eRenderStage stage) {
                                                    (el0.lastGY - monitor->m_position.y) * s - 2.0,
                                                    el0.lastGW * s + 4.0, el0.lastGH * s + 4.0));
                     }
+                    el.lastDrawCause = cause;
                     here.push_back(el);
-                    el0.wasDrawn = true;
-                    el0.lastGX   = monitor->m_position.x + el.x;
-                    el0.lastGY   = monitor->m_position.y + el.y;
-                    el0.lastGW   = el.w;
-                    el0.lastGH   = el.h;
-                    el0.drawCount++;
-                    el0.lastDrawCause = cause;
                     if (propagate) {
+                        const double currentGX = monitor->m_position.x + el.x;
+                        const double currentGY = monitor->m_position.y + el.y;
                         for (const auto& sub : subLogical) {
-                            drawnGlobal.push_back(CBox(el0.lastGX + sub.x, el0.lastGY + sub.y, sub.width, sub.height));
+                            drawnGlobal.push_back(CBox(currentGX + sub.x, currentGY + sub.y, sub.width, sub.height));
                             drawnScaled.push_back(CBox((el.x + sub.x) * s - 2.0, (el.y + sub.y) * s - 2.0, sub.width * s + 4.0, sub.height * s + 4.0));
                         }
                     }
