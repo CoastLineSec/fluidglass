@@ -14,6 +14,8 @@ namespace hfg::v2 {
 
 class HyprlandWindowCatalog {
   public:
+    [[nodiscard]] Result<std::vector<WindowSnapshot>>
+    allSnapshots();
     [[nodiscard]] Result<std::vector<WindowSnapshot>> snapshots(
         std::string_view address);
     [[nodiscard]] Result<PHLWINDOW> windowFor(

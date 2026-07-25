@@ -1,5 +1,7 @@
 #include "v2/targets/HyprlandWindowCatalog.hpp"
 
+#include "v2/core/Limits.hpp"
+
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/desktop/view/Window.hpp>
 
@@ -61,12 +63,7 @@ Result<std::uint64_t> HyprlandWindowCatalog::tokenFor(
 }
 
 Result<std::vector<WindowSnapshot>>
-HyprlandWindowCatalog::snapshots(std::string_view address) {
-    if (!validAddress(address))
-        return unavailable(
-            ErrorCode::InvalidRequest,
-            "address",
-            "expected a canonical lower-case hexadecimal window address");
+HyprlandWindowCatalog::allSnapshots() {
     if (!g_pCompositor)
         return unavailable(
             ErrorCode::UnsupportedOperation,
@@ -81,8 +78,6 @@ HyprlandWindowCatalog::snapshots(std::string_view address) {
         if (!window)
             continue;
         const auto candidateAddress = addressFor(window);
-        if (candidateAddress != address)
-            continue;
 
         PHLWINDOWREF reference = window;
         auto token = tokenFor(reference);
@@ -96,17 +91,49 @@ HyprlandWindowCatalog::snapshots(std::string_view address) {
             .objectToken = token.value(),
             .pid = static_cast<std::int64_t>(window->getPID()),
             .initialClass = window->m_initialClass,
+            .currentClass = window->m_class,
+            .initialTitle = window->m_initialTitle,
+            .currentTitle = window->m_title,
             .globalGeometry = Rect{
                 .x = position.x,
                 .y = position.y,
                 .width = size.x,
                 .height = size.y,
             },
+            .rounding = static_cast<double>(window->rounding()),
+            .roundingPower =
+                static_cast<double>(window->roundingPower()),
             .opacity = static_cast<double>(window->effectiveAlpha()),
             .mapped = window->m_isMapped,
             .fadingOut = window->m_fadingOut,
             .readyToDelete = window->m_readyToDelete,
         });
+        if (result.size() > Limits::MAX_COMPOSITOR_OBJECTS)
+            return unavailable(
+                ErrorCode::ResourceLimited,
+                "windows",
+                "compositor window count exceeds the supported limit");
+    }
+    return Result<std::vector<WindowSnapshot>>::success(
+        std::move(result));
+}
+
+Result<std::vector<WindowSnapshot>>
+HyprlandWindowCatalog::snapshots(std::string_view address) {
+    if (!validAddress(address))
+        return unavailable(
+            ErrorCode::InvalidRequest,
+            "address",
+            "expected a canonical lower-case hexadecimal window address");
+    auto all = allSnapshots();
+    if (!all)
+        return all;
+
+    std::vector<WindowSnapshot> result;
+    for (auto& snapshot : all.value()) {
+        if (snapshot.address != address)
+            continue;
+        result.push_back(std::move(snapshot));
         if (result.size() > 1U)
             return unavailable(
                 ErrorCode::UnresolvedTarget,

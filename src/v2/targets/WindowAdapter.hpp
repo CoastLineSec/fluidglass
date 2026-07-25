@@ -17,7 +17,12 @@ struct WindowSnapshot {
     std::uint64_t objectToken = 0;
     std::int64_t  pid = 0;
     std::string   initialClass;
+    std::string   currentClass;
+    std::string   initialTitle;
+    std::string   currentTitle;
     Rect          globalGeometry;
+    double        rounding = 0.0;
+    double        roundingPower = 2.0;
     double        opacity = 1.0;
     bool          mapped = false;
     bool          fadingOut = false;

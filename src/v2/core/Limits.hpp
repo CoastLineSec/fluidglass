@@ -20,6 +20,7 @@ struct Limits {
     static constexpr std::size_t MAX_BEZIER_SEGMENTS       = 16U;
     static constexpr std::size_t MAX_CAPTURE_REQUESTS       = 512U;
     static constexpr std::size_t MAX_PRESENTATIONS_PER_TARGET = 64U;
+    static constexpr std::size_t MAX_COMPOSITOR_OBJECTS     = 2'048U;
     static constexpr std::uint32_t MAX_OUTPUT_BUFFER_DIMENSION = 65'536U;
 
     static constexpr std::uint64_t CLIENT_LEASE_MS         = 15'000U;
