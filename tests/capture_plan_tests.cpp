@@ -223,5 +223,19 @@ int main() {
             required.region = PixelRect{.x = 0, .y = 20, .width = 20, .height = 20};
             require(!capturePlanCovers(available, required), "uncontained capture was reusable");
         }},
+        Case{"standalone plan validation rejects inconsistent accounting", [] {
+            CapturePlan capture{
+                .key = CaptureKey{"DP-1", 1, RenderStage::PostWindows, AR24, 7},
+                .region = PixelRect{.x = 0, .y = 0, .width = 10, .height = 10},
+                .bytesPerPixel = 4,
+                .pixelCount = 100,
+                .byteCount = 400,
+            };
+            require(validateCapturePlan(capture).hasValue(), "valid capture plan was rejected");
+            capture.pixelCount = 99;
+            const auto result = validateCapturePlan(capture);
+            require(!result, "inconsistent pixel count was accepted");
+            require(result.error().path == "plan.pixel_count", "wrong plan-validation path");
+        }},
     });
 }

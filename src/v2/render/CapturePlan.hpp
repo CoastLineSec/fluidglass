@@ -51,6 +51,8 @@ struct CapturePlan {
     friend bool operator==(const CapturePlan&, const CapturePlan&) = default;
 };
 
+[[nodiscard]] Result<void> validateCapturePlan(const CapturePlan& plan);
+
 [[nodiscard]] Result<std::vector<CapturePlan>> planCaptures(
     std::span<const CaptureRequest> requests,
     const CaptureLimits& limits);

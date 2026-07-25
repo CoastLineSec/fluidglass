@@ -3,36 +3,9 @@
 #include "v2/core/Limits.hpp"
 
 #include <algorithm>
-#include <limits>
 #include <utility>
 
 namespace hfg::v2 {
-namespace {
-
-bool validPlan(const CapturePlan& plan) {
-    if (plan.key.output.empty() ||
-        plan.key.outputGeneration == 0U ||
-        plan.key.renderFormat == 0U ||
-        plan.region.x < 0 ||
-        plan.region.y < 0 ||
-        plan.region.width <= 0 ||
-        plan.region.height <= 0 ||
-        plan.bytesPerPixel == 0U ||
-        plan.pixelCount == 0U ||
-        plan.byteCount == 0U)
-        return false;
-    const auto width = static_cast<std::uint64_t>(plan.region.width);
-    const auto height = static_cast<std::uint64_t>(plan.region.height);
-    if (width > std::numeric_limits<std::uint64_t>::max() / height)
-        return false;
-    const auto pixels = width * height;
-    if (pixels != plan.pixelCount ||
-        pixels > std::numeric_limits<std::uint64_t>::max() / plan.bytesPerPixel)
-        return false;
-    return pixels * plan.bytesPerPixel == plan.byteCount;
-}
-
-} // namespace
 
 Result<void> CaptureResourceIndex::add(CaptureResource resource) {
     if (resource.token == 0U)
@@ -41,11 +14,11 @@ Result<void> CaptureResourceIndex::add(CaptureResource resource) {
             "resource.token",
             "capture resource token must not be zero",
         });
-    if (!validPlan(resource.plan))
+    if (auto validation = validateCapturePlan(resource.plan); !validation)
         return Result<void>::failure({
-            ErrorCode::InvalidRequest,
-            "resource.plan",
-            "capture resource plan is malformed",
+            validation.error().code,
+            "resource." + validation.error().path,
+            validation.error().message,
         });
     if (m_resources.size() >= Limits::MAX_CAPTURE_REQUESTS)
         return Result<void>::failure({

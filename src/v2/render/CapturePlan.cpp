@@ -3,6 +3,7 @@
 #include "v2/core/Limits.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <limits>
 #include <optional>
 #include <string>
@@ -31,6 +32,14 @@ bool validStage(RenderStage stage) {
             return true;
     }
     return false;
+}
+
+bool validOutputName(std::string_view output) {
+    return !output.empty() &&
+        output.size() <= Limits::MAX_IDENTIFIER_BYTES &&
+        std::ranges::none_of(output, [](const unsigned char character) {
+            return std::iscntrl(character);
+        });
 }
 
 Result<void> validateLimits(const CaptureLimits& limits) {
@@ -122,6 +131,70 @@ PixelRect unionRect(const PixelRect& left, const PixelRect& right) {
 }
 
 } // namespace
+
+Result<void> validateCapturePlan(const CapturePlan& plan) {
+    if (!validOutputName(plan.key.output))
+        return Result<void>::failure({
+            ErrorCode::InvalidRequest,
+            "plan.key.output",
+            "expected a non-empty bounded output name",
+        });
+    if (plan.key.outputGeneration == 0U)
+        return Result<void>::failure({
+            ErrorCode::InvalidRequest,
+            "plan.key.output_generation",
+            "output generation must not be zero",
+        });
+    if (!validStage(plan.key.stage))
+        return Result<void>::failure({
+            ErrorCode::InvalidRequest,
+            "plan.key.stage",
+            "unsupported capture stage",
+        });
+    if (plan.key.renderFormat == 0U)
+        return Result<void>::failure({
+            ErrorCode::InvalidRequest,
+            "plan.key.render_format",
+            "render format must not be zero",
+        });
+    if (plan.region.x < 0 || plan.region.y < 0 ||
+        plan.region.width <= 0 || plan.region.height <= 0)
+        return Result<void>::failure({
+            ErrorCode::InvalidRequest,
+            "plan.region",
+            "expected a non-empty pixel rectangle",
+        });
+    if (plan.bytesPerPixel == 0U || plan.bytesPerPixel > 64U)
+        return Result<void>::failure({
+            ErrorCode::InvalidRequest,
+            "plan.bytes_per_pixel",
+            "capture format size is outside the supported range",
+        });
+
+    const auto width = static_cast<std::uint64_t>(plan.region.width);
+    const auto height = static_cast<std::uint64_t>(plan.region.height);
+    if (width > std::numeric_limits<std::uint64_t>::max() / height)
+        return Result<void>::failure({
+            ErrorCode::ResourceLimited,
+            "plan.pixel_count",
+            "capture pixel count overflows",
+        });
+    const auto pixels = width * height;
+    if (pixels != plan.pixelCount ||
+        pixels > std::numeric_limits<std::uint64_t>::max() / plan.bytesPerPixel)
+        return Result<void>::failure({
+            ErrorCode::InvalidRequest,
+            "plan.pixel_count",
+            "capture pixel count does not match its region",
+        });
+    if (pixels * plan.bytesPerPixel != plan.byteCount)
+        return Result<void>::failure({
+            ErrorCode::InvalidRequest,
+            "plan.byte_count",
+            "capture byte count does not match its format and region",
+        });
+    return Result<void>::success();
+}
 
 Result<std::vector<CapturePlan>> planCaptures(
     std::span<const CaptureRequest> requests,
