@@ -1,7 +1,8 @@
 # Runtime protocol reference
 
-Availability: planned for HyprFluidGlass v2; not available in the current
-release.
+Availability: the v2 control plane is available in current development builds.
+Clients must check `rendering_ready` before expecting submitted targets to
+draw.
 
 The runtime protocol lets shells and other local clients create temporary
 glass targets without editing Hyprland configuration. It is generic: every

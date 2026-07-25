@@ -84,15 +84,21 @@ when iterating, since Hyprland's loader caches plugins by path.
 
 ## Usage
 
-The plugin registers four `hyprctl` dispatchers. It does nothing until a client
-sends it elements and enables it.
+The plugin keeps the v1 compatibility commands and also exposes the versioned
+v2 control plane. The current renderer continues to use v1 elements until the
+v2 capability response reports `rendering_ready: true`.
 
-| Dispatcher | Purpose |
+| Command | Purpose |
 |---|---|
+| `hyprfluidglass <json>` | Versioned v2 runtime protocol. |
 | `hyprfluidglass-apply-json <json>` | Replace the element set + global enable state. |
 | `hyprfluidglass-status` | Plugin/render status. Use `hyprctl -j hyprfluidglass-status` for JSON. |
 | `hyprfluidglass-clear` | Remove all elements. |
 | `hyprfluidglass-material <on\|off\|status>` | Global enable/disable, or status. |
+
+See the [runtime protocol reference](docs/reference/runtime-protocol.md) for
+session-based v2 requests. Clients must query `capabilities` before submitting
+v2 render targets.
 
 ### Apply payload
 
