@@ -95,6 +95,10 @@ Response fields include:
     "rendering_ready": true,
     "target_kinds": ["window", "layer", "region"],
     "shapes": ["rounded-rect", "ring", "compound"],
+    "transitions": {
+      "targets": true,
+      "compound_parts": true
+    },
     "operations": [
       "capabilities",
       "status",
@@ -114,7 +118,9 @@ Response fields include:
       "dynamic_targets": 512,
       "materials_per_owner": 128,
       "compound_parts": 32,
-      "compound_connectors": 32
+      "compound_connectors": 32,
+      "bezier_segments": 16,
+      "transition_ms": 60000
     }
   }
 }
@@ -461,6 +467,56 @@ Each part may also declare:
 A compound must contain a base or at least one part. Cutouts, parts, material
 extents, and connectors require positive sizes. Part and connector limits are
 reported through `capabilities`.
+
+## Transitions
+
+A target may carry one transition:
+
+```json
+{
+  "id": "bar-enter-17",
+  "phase": "enter",
+  "edge": "bottom",
+  "duration_ms": 240,
+  "elapsed_ms": 40,
+  "travel": 44,
+  "easing": [
+    {
+      "control1_x": 0.2,
+      "control1_y": 0,
+      "control2_x": 0.3,
+      "control2_y": 1,
+      "end_x": 1,
+      "end_y": 1
+    }
+  ]
+}
+```
+
+`id` identifies one motion event. Replacing a session with the same transition
+ID updates the target without restarting that event. A new ID starts a new
+event even when `phase` is unchanged.
+
+Transition fields:
+
+- `phase`: `enter` or `exit`.
+- `edge`: `top`, `bottom`, `left`, or `right`.
+- `duration_ms`: a positive integer no greater than the advertised
+  `transition_ms` limit.
+- `elapsed_ms`: a non-negative integer no greater than `duration_ms`. It lets a
+  client and the compositor begin from the same point in an already-running
+  animation.
+- `travel`: a finite, non-negative logical-pixel distance.
+- `easing`: a bounded array of cubic Bezier segments. An empty array is linear.
+
+Each Bezier segment begins at the previous segment's endpoint, or `(0, 0)` for
+the first segment. Control-point x values stay inside that segment's x range,
+endpoint x values advance monotonically, and the final segment ends at
+`(1, 1)`.
+
+A compound part accepts the same object under its `transition` field and adds
+`protrusion`, the maximum logical-pixel length that may collapse during the
+part transition. When omitted, `protrusion` defaults to `travel`.
 
 ## Heartbeats and expiry
 

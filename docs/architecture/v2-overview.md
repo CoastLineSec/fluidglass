@@ -256,6 +256,11 @@ bridging rectangles, and per-part material extents. This representation keeps
 multi-surface frames and connected shell elements generic instead of encoding
 shell-specific shape names in the plugin.
 
+Targets and compound parts may declare bounded compositor-driven transitions.
+A stable transition ID distinguishes a repeated snapshot from a new motion
+event, while elapsed time lets a client synchronize content motion without
+driving glass geometry frame by frame.
+
 ## Rendering pipeline
 
 The intended render pipeline is:
