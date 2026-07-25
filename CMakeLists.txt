@@ -59,6 +59,7 @@ if(BUILD_TESTING)
     add_library(hyprfluidglass-v2-core STATIC
         src/v2/model/Config.cpp
         src/v2/model/Material.cpp
+        src/v2/model/Readiness.cpp
         src/v2/model/Session.cpp
         src/v2/model/Target.cpp
     )
@@ -96,4 +97,10 @@ if(BUILD_TESTING)
     target_link_libraries(hyprfluidglass-config-tests PRIVATE hyprfluidglass-v2-core)
     target_compile_options(hyprfluidglass-config-tests PRIVATE -Wall -Wextra -Wpedantic)
     add_test(NAME hyprfluidglass-config COMMAND hyprfluidglass-config-tests)
+
+    add_executable(hyprfluidglass-readiness-tests tests/readiness_tests.cpp)
+    target_include_directories(hyprfluidglass-readiness-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+    target_link_libraries(hyprfluidglass-readiness-tests PRIVATE hyprfluidglass-v2-core)
+    target_compile_options(hyprfluidglass-readiness-tests PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME hyprfluidglass-readiness COMMAND hyprfluidglass-readiness-tests)
 endif()
