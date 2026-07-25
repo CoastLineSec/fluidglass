@@ -2574,31 +2574,54 @@ bool sameRenderFields(const GlassElement& a, const GlassElement& b) {
 //    rimWidth, highlight, shadow, lightAngle, specular, chroma, edgeDepth.
 //  Legacy: anchorWindow/offsetX/offsetY parse as bind{type:"window"}.
 //  See README.md for the full schema + semantics.
+static constexpr size_t LEGACY_MAX_REQUEST_BYTES = 256 * 1024;
+static constexpr size_t LEGACY_MAX_ELEMENTS      = 512;
+static constexpr size_t LEGACY_MAX_ID_BYTES      = 128;
+static constexpr size_t LEGACY_MAX_MONITOR_BYTES = 128;
+static constexpr size_t LEGACY_MAX_SELECTOR_BYTES = 256;
+
+std::string rejectApply(std::string message) {
+    const std::string response = message;
+    {
+        std::lock_guard guard(g_stateMutex);
+        g_lastApplyStatus = "rejected";
+        g_lastError       = message;
+    }
+    dbgLog("", "apply.error", response);
+    return "error: " + response + "\n";
+}
+
 std::string applyPayload(std::string payload) {
     payload = trim(std::move(payload));
+    if (payload.size() > LEGACY_MAX_REQUEST_BYTES)
+        return rejectApply("payload exceeds 256 KiB");
     if (payload.empty() || payload.front() != '{') {
-        std::lock_guard g(g_stateMutex);
-        g_lastApplyStatus = "rejected";
-        g_lastError = "payload must be a JSON object";
-        return "error: payload must be a JSON object\n";
+        return rejectApply("payload must be a JSON object");
     }
     json doc;
     try { doc = json::parse(payload); }
     catch (const std::exception& e) {
-        std::lock_guard g(g_stateMutex);
-        g_lastApplyStatus = "rejected";
-        g_lastError = std::string("json parse: ") + e.what();
-        dbgLog("", "apply.error", g_lastError);
-        return "error: " + g_lastError + "\n";
+        return rejectApply(std::string("json parse: ") + e.what());
     }
+    if (!doc.is_object())
+        return rejectApply("payload must be a JSON object");
 
     std::map<std::string, GlassElement> parsed;
-    if (auto it = doc.find("elements"); it != doc.end() && it->is_array()) {
+    if (auto it = doc.find("elements"); it != doc.end()) {
+        if (!it->is_array())
+            return rejectApply("elements must be an array");
+        if (it->size() > LEGACY_MAX_ELEMENTS)
+            return rejectApply("elements exceeds the 512 item limit");
         for (const auto& e : *it) {
-            if (!e.is_object()) continue;
+            if (!e.is_object())
+                return rejectApply("every element must be an object");
             GlassElement el;
             el.id      = jstr(e, "id");
             el.monitor = jstr(e, "monitor");
+            if (el.id.size() > LEGACY_MAX_ID_BYTES)
+                return rejectApply("element id exceeds 128 bytes");
+            if (el.monitor.size() > LEGACY_MAX_MONITOR_BYTES)
+                return rejectApply("monitor name exceeds 128 bytes");
             el.x = jnum(e, "x"); el.y = jnum(e, "y");
             el.w = jnum(e, "w"); el.h = jnum(e, "h");
             el.radius      = jnum(e, "radius");
@@ -2622,22 +2645,29 @@ std::string applyPayload(std::string payload) {
             el.blurLevel    = jnum(e, "blurLevel", -1.0);
             el.tintLevel    = jnum(e, "tintLevel", -1.0);
             el.rev          = static_cast<uint64_t>(jnum(e, "rev", 0.0));   // P4: shell-owned descriptor revision
-            if (auto b = e.find("bind"); b != e.end() && b->is_object()) {
+            bool requestedBind = false;
+            if (auto b = e.find("bind"); b != e.end()) {
+                requestedBind   = true;
+                if (!b->is_object())
+                    return rejectApply("bind must be an object");
                 el.bindType     = jstr(*b, "type");
                 el.bindSelector = jstr(*b, "selector");
                 el.relX         = jnum(*b, "relX", 0.0);
                 el.relY         = jnum(*b, "relY", 0.0);
             } else if (const std::string aw = jstr(e, "anchorWindow"); !aw.empty()) {
+                requestedBind   = true;
                 // Legacy schema: anchorWindow/offsetX/offsetY is a window bind.
                 el.bindType     = "window";
                 el.bindSelector = aw;
                 el.relX         = jnum(e, "offsetX", 0.0);
                 el.relY         = jnum(e, "offsetY", 0.0);
             }
-            if ((el.bindType != "layer" && el.bindType != "window") || el.bindSelector.empty()) {
-                el.bindType.clear();
-                el.bindSelector.clear();
-            }
+            if (requestedBind && (el.bindType != "layer" && el.bindType != "window"))
+                return rejectApply("bind type must be layer or window");
+            if (requestedBind && el.bindSelector.empty())
+                return rejectApply("bind selector must not be empty");
+            if (el.bindSelector.size() > LEGACY_MAX_SELECTOR_BYTES)
+                return rejectApply("bind selector exceeds 256 bytes");
             if (auto sd = e.find("side"); sd != e.end() && sd->is_string()) {
                 const std::string sv = sd->get<std::string>();
                 el.elTrSide = sv == "bottom" ? 1 : sv == "left" ? 2 : sv == "right" ? 3 : 0;
@@ -2738,7 +2768,11 @@ std::string applyPayload(std::string payload) {
                 }
             }
             if (el.id.empty()) el.id = (el.monitor.empty() ? std::string("anchor") : el.monitor) + ":" + std::to_string(parsed.size());
-            if (!el.monitor.empty() || el.bindType == "window") parsed[el.id] = el;
+            if (el.monitor.empty() && el.bindType != "window")
+                return rejectApply("element requires a monitor or window bind");
+            if (parsed.contains(el.id))
+                return rejectApply("element ids must be unique");
+            parsed.emplace(el.id, std::move(el));
         }
     }
     const bool enabled = jbool(doc, "enabled", true);
