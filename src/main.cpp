@@ -40,9 +40,6 @@
 #include <hyprland/src/desktop/view/Window.hpp>
 #include <hyprland/src/desktop/view/LayerSurface.hpp>
 #include <hyprland/src/desktop/rule/windowRule/WindowRuleApplicator.hpp>
-// ANR (app-not-responding) bridge: read Hyprland's own not-responding state and relay it
-// to the shell so HGS can own the "force quit" dialog.
-#include <hyprland/src/managers/ANRManager.hpp>
 #include <hyprland/src/managers/EventManager.hpp>
 #include <hyprland/src/managers/eventLoop/EventLoopManager.hpp>
 #include <hyprland/src/managers/eventLoop/EventLoopTimer.hpp>
@@ -81,17 +78,7 @@ SP<SHyprCtlCommand> g_applyCommand;
 SP<SHyprCtlCommand> g_clearCommand;
 SP<SHyprCtlCommand> g_materialCommand;
 SP<SHyprCtlCommand> g_debugCommand;
-SP<SHyprCtlCommand> g_anrCommand;
 CHyprSignalListener g_renderStageListener;
-
-// ── ANR watchdog ────────────────────────────────────────────────────────────
-// A steady 1s timer reads Hyprland's per-window not-responding verdict (its own
-// ping/pong-based CANRManager) and, whenever the set changes, emits a socket2 event
-// (hgsanr>>[json]) that the shell listens for via Hyprland.rawEvent. Push-on-change:
-// zero cost while everything is healthy. hyprfluidglass-anr returns the current set for
-// initial sync.
-SP<CEventLoopTimer> g_anrTimer;
-std::string         g_anrLastSig = "";
 
 // ── P4 readiness contract (hgsglass event + per-descriptor readiness) ─────────
 // The shell proves, per descriptor and per REVISION, that HyprFluidGlass accepted
@@ -3121,45 +3108,6 @@ std::string statusString(eHyprCtlOutputFormat format) {
            " render=" + g_lastRenderStatus + "\n";
 }
 
-// Build the JSON array of currently not-responding windows (single line, no newlines).
-static std::string anrBuildJson() {
-    std::string out = "[";
-    if (g_pANRManager) {
-        bool first = true;
-        for (const auto& w : g_pCompositor->m_windows) {
-            if (!w || !w->m_isMapped)
-                continue;
-            if (!g_pANRManager->isNotResponding(w))
-                continue;
-            nlohmann::json j;
-            j["address"] = std::format("0x{:x}", reinterpret_cast<uintptr_t>(w.get()));
-            j["pid"]     = static_cast<int>(w->getPID());
-            j["class"]   = w->m_class;
-            j["title"]   = w->m_title;
-            if (!first)
-                out += ",";
-            out += j.dump();
-            first = false;
-        }
-    }
-    out += "]";
-    return out;
-}
-
-// Called on the compositor's event loop once a second. Emits an event only when the
-// not-responding set changes (the JSON payload doubles as the change signature).
-static void anrScan() {
-    if (!g_pANRManager || !g_pEventManager)
-        return;
-    const std::string json = anrBuildJson();
-    if (json == g_anrLastSig)
-        return;
-    g_anrLastSig = json;
-    g_pEventManager->postEvent(SHyprIPCEvent{"hgsanr", json});
-}
-
-std::string onAnr(eHyprCtlOutputFormat, std::string) { return anrBuildJson(); }
-
 // ── P4 hgsglass readiness event ───────────────────────────────────────────────
 // Compact change signature: only the ACTIVATION-relevant fields (excludes volatile
 // diagnostics like drawCount / exact position, which change every frame an element
@@ -3350,19 +3298,9 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     g_materialCommand = HyprlandAPI::registerHyprCtlCommand(g_handle, mat);
     SHyprCtlCommand dbg;    dbg.name    = "hyprfluidglass-debug-json"; dbg.exact    = true;  dbg.fn    = onDebugJson;
     g_debugCommand = HyprlandAPI::registerHyprCtlCommand(g_handle, dbg);
-    SHyprCtlCommand anr;    anr.name    = "hyprfluidglass-anr";        anr.exact    = true;  anr.fn    = onAnr;
-    g_anrCommand   = HyprlandAPI::registerHyprCtlCommand(g_handle, anr);
     HyprlandAPI::addDispatcherV2(g_handle, "hyprfluidglass-apply", onApplyDispatch);
 
-    // steady ANR poll (re-arms itself); observes Hyprland's own not-responding verdict
     if (g_pEventLoopManager) {
-        g_anrTimer = makeShared<CEventLoopTimer>(std::chrono::seconds(1), [](SP<CEventLoopTimer> self, void*) {
-            anrScan();
-            if (self)
-                self->updateTimeout(std::chrono::seconds(1));
-        }, nullptr);
-        g_pEventLoopManager->addTimer(g_anrTimer);
-
         // P4: hgsglass readiness/health timer — coalesced change events + ~1s
         // heartbeat while descriptors are active; self-re-arms at a variable cadence.
         g_glassTimer = makeShared<CEventLoopTimer>(std::chrono::milliseconds(200), [](SP<CEventLoopTimer> self, void*) {
@@ -3400,12 +3338,6 @@ APICALL EXPORT void PLUGIN_EXIT() {
             g_pEventLoopManager->removeTimer(g_glassTimer);
         g_glassTimer.reset();
     }
-    if (g_anrTimer) {
-        g_anrTimer->cancel();
-        if (g_pEventLoopManager)
-            g_pEventLoopManager->removeTimer(g_anrTimer);
-        g_anrTimer.reset();
-    }
     {
         std::lock_guard g(g_stateMutex);
         g_enabled = false;
@@ -3425,13 +3357,12 @@ APICALL EXPORT void PLUGIN_EXIT() {
     if (g_quadVbo) { glDeleteBuffers(1, &g_quadVbo); g_quadVbo = 0; }
     if (g_quadVao) { glDeleteVertexArrays(1, &g_quadVao); g_quadVao = 0; }
     HyprlandAPI::removeDispatcher(g_handle, "hyprfluidglass-apply");
-    if (g_anrCommand)      HyprlandAPI::unregisterHyprCtlCommand(g_handle, g_anrCommand);
     if (g_debugCommand)    HyprlandAPI::unregisterHyprCtlCommand(g_handle, g_debugCommand);
     if (g_materialCommand) HyprlandAPI::unregisterHyprCtlCommand(g_handle, g_materialCommand);
     if (g_clearCommand)    HyprlandAPI::unregisterHyprCtlCommand(g_handle, g_clearCommand);
     if (g_applyCommand)    HyprlandAPI::unregisterHyprCtlCommand(g_handle, g_applyCommand);
     if (g_statusCommand)   HyprlandAPI::unregisterHyprCtlCommand(g_handle, g_statusCommand);
-    g_anrCommand.reset(); g_debugCommand.reset(); g_materialCommand.reset(); g_clearCommand.reset(); g_applyCommand.reset(); g_statusCommand.reset();
+    g_debugCommand.reset(); g_materialCommand.reset(); g_clearCommand.reset(); g_applyCommand.reset(); g_statusCommand.reset();
     {
         std::lock_guard g(g_dbgMutex);
         g_dbgEvents.clear();
