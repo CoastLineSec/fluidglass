@@ -72,6 +72,7 @@ add_library(hyprfluidglass-v2-core STATIC
     src/v2/render/Geometry.cpp
     src/v2/render/OutputGeneration.cpp
     src/v2/runtime/Runtime.cpp
+    src/v2/targets/Attachment.cpp
 )
 target_include_directories(hyprfluidglass-v2-core PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
@@ -182,6 +183,12 @@ if(BUILD_TESTING)
     target_link_libraries(hyprfluidglass-capture-blit-tests PRIVATE hyprfluidglass-v2-core)
     target_compile_options(hyprfluidglass-capture-blit-tests PRIVATE -Wall -Wextra -Wpedantic)
     add_test(NAME hyprfluidglass-capture-blit COMMAND hyprfluidglass-capture-blit-tests)
+
+    add_executable(hyprfluidglass-attachment-tests tests/attachment_tests.cpp)
+    target_include_directories(hyprfluidglass-attachment-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+    target_link_libraries(hyprfluidglass-attachment-tests PRIVATE hyprfluidglass-v2-core)
+    target_compile_options(hyprfluidglass-attachment-tests PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME hyprfluidglass-attachment COMMAND hyprfluidglass-attachment-tests)
 
     add_executable(hyprfluidglass-protocol-tests tests/protocol_tests.cpp)
     target_include_directories(hyprfluidglass-protocol-tests PRIVATE
