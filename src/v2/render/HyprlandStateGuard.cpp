@@ -81,7 +81,21 @@ HyprlandStateGuard::~HyprlandStateGuard() {
     static_cast<void>(restore());
 }
 
+Result<std::unique_ptr<HyprlandStateGuard>>
+HyprlandStateGuard::captureWithoutShaderMutation(
+    std::span<const std::uint32_t> textureUnits) {
+    return capture(false, {}, textureUnits);
+}
+
+Result<std::unique_ptr<HyprlandStateGuard>>
+HyprlandStateGuard::captureWithShaderMutation(
+    std::span<const SP<CShader>> additionalTrackedShaders,
+    std::span<const std::uint32_t> textureUnits) {
+    return capture(true, additionalTrackedShaders, textureUnits);
+}
+
 Result<std::unique_ptr<HyprlandStateGuard>> HyprlandStateGuard::capture(
+    bool shaderWillChange,
     std::span<const SP<CShader>> additionalTrackedShaders,
     std::span<const std::uint32_t> textureUnits) {
     if (!g_pHyprRenderer || !Render::GL::g_pHyprOpenGL)
@@ -91,19 +105,22 @@ Result<std::unique_ptr<HyprlandStateGuard>> HyprlandStateGuard::capture(
     if (!g_pHyprRenderer->m_renderData.currentFB)
         return unavailable("renderer.framebuffer", "current framebuffer is unavailable");
 
-    GLint currentProgram = 0;
-    glGetIntegerv(GL_CURRENT_PROGRAM, &currentProgram);
-    if (currentProgram <= 0)
-        return unavailable(
-            "renderer.shader",
-            "current shader program is not restorable through Hyprland");
-    auto shader = findTrackedShader(
-        static_cast<GLuint>(currentProgram),
-        additionalTrackedShaders);
-    if (!shader)
-        return unavailable(
-            "renderer.shader",
-            "current shader is not registered with the tracked renderer");
+    SP<CShader> shader;
+    if (shaderWillChange) {
+        GLint currentProgram = 0;
+        glGetIntegerv(GL_CURRENT_PROGRAM, &currentProgram);
+        if (currentProgram <= 0)
+            return unavailable(
+                "renderer.shader",
+                "current shader program is not restorable through Hyprland");
+        shader = findTrackedShader(
+            static_cast<GLuint>(currentProgram),
+            additionalTrackedShaders);
+        if (!shader)
+            return unavailable(
+                "renderer.shader",
+                "current shader is not registered with the tracked renderer");
+    }
 
     GLint maximumTextureUnits = 0;
     glGetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &maximumTextureUnits);
@@ -183,7 +200,8 @@ Result<void> HyprlandStateGuard::restore() {
     g_pHyprRenderer->m_renderData.fbSize = m_snapshot->framebufferSize;
     g_pHyprRenderer->m_renderData.transformDamage = m_snapshot->transformDamage;
     g_pHyprRenderer->setProjectionType(m_snapshot->projectionType);
-    Render::GL::g_pHyprOpenGL->useShader(m_snapshot->shader);
+    if (m_snapshot->shader)
+        Render::GL::g_pHyprOpenGL->useShader(m_snapshot->shader);
 
     g_pHyprRenderer->blend(m_snapshot->blendEnabled);
     glBlendFuncSeparate(

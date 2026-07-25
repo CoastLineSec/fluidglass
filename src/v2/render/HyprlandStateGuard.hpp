@@ -12,7 +12,12 @@ namespace hfg::v2 {
 
 class HyprlandStateGuard {
   public:
-    [[nodiscard]] static Result<std::unique_ptr<HyprlandStateGuard>> capture(
+    [[nodiscard]] static Result<std::unique_ptr<HyprlandStateGuard>>
+    captureWithoutShaderMutation(
+        std::span<const std::uint32_t> textureUnits);
+
+    [[nodiscard]] static Result<std::unique_ptr<HyprlandStateGuard>>
+    captureWithShaderMutation(
         std::span<const SP<CShader>> additionalTrackedShaders,
         std::span<const std::uint32_t> textureUnits);
 
@@ -27,6 +32,11 @@ class HyprlandStateGuard {
 
   private:
     struct Snapshot;
+
+    [[nodiscard]] static Result<std::unique_ptr<HyprlandStateGuard>> capture(
+        bool shaderWillChange,
+        std::span<const SP<CShader>> additionalTrackedShaders,
+        std::span<const std::uint32_t> textureUnits);
 
     explicit HyprlandStateGuard(std::unique_ptr<Snapshot> snapshot);
 
