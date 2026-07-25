@@ -43,7 +43,7 @@ contract is generic — anything that can call `hyprctl` can drive it.
 ## Requirements
 
 - **Hyprland** (a matching dev/header package for manual builds).
-- A C++26 toolchain + CMake ≥ 3.16 (for manual builds; `hyprpm` brings its own
+- A C++23 toolchain + CMake ≥ 3.16 (for manual builds; `hyprpm` brings its own
   build environment).
 - `nlohmann/json` is **vendored** (`include/`), so it is *not* a system
   dependency.
