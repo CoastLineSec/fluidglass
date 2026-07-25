@@ -184,6 +184,7 @@ Capture compatibility is exact:
 
 ```text
 output connector + output generation + render stage + render format + color state
++ exact window object for a pre-window capture
 ```
 
 Targets with compatible overlapping bounds share the smallest useful capture
@@ -191,6 +192,12 @@ union. Distant targets remain separate when merging them would exceed the
 adapter's width, height, pixel, or byte limits. A thin target therefore does
 not require allocating or shading a full-output intermediate when bounded
 capture is sufficient.
+
+`pre-window` is object-relative rather than output-global. Its capture identity
+includes the exact internal window token, so glass below one application cannot
+reuse backdrop captured at another application's position in the window stack.
+Region targets cannot request `pre-window` because they do not identify a
+window.
 
 The renderer adapter reports bytes per pixel and allocation limits for the
 actual DRM format. The planner does not infer a memory layout from a fourcc or

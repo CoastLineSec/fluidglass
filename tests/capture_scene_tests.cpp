@@ -36,7 +36,9 @@ PlannedPresentation presentation(
     PixelRect coverage,
     std::uint32_t format = AR24,
     std::uint32_t apron = 10,
-    RenderStage stage = RenderStage::PostWindows) {
+    RenderStage stage = RenderStage::PostWindows,
+    std::uint64_t objectToken = 1,
+    TargetKind kind = TargetKind::Region) {
     const TargetIdentity identity{
         .owner = "client:demo:s1",
         .targetId = id,
@@ -67,7 +69,7 @@ PlannedPresentation presentation(
         .target = ResolvedTarget{
             .definition = Target{
                 .id = id,
-                .kind = TargetKind::Region,
+                .kind = kind,
                 .material = {
                     .source = MaterialSource::Session,
                     .name = "fluid",
@@ -86,8 +88,8 @@ PlannedPresentation presentation(
             },
             .attachment = ResolvedAttachment{
                 .identity = identity,
-                .kind = TargetKind::Region,
-                .objectToken = 1,
+                .kind = kind,
+                .objectToken = objectToken,
                 .globalGeometry = Rect{
                     static_cast<double>(coverage.x),
                     static_cast<double>(coverage.y),
@@ -108,7 +110,7 @@ PlannedPresentation presentation(
                 .outputGeneration = 1,
                 .stage = stage,
             },
-            .attachmentToken = 1,
+            .attachmentToken = objectToken,
             .geometry = MappedGeometry{
                 .clippedGlobal = {},
                 .outputLocal = {},
@@ -188,6 +190,70 @@ int main() {
                     "SDR format size changed");
             require(result.value().captures[1].bytesPerPixel == 8U,
                     "FP16 format size changed");
+        }},
+        Case{"different windows never share a pre-window capture", [] {
+            const auto input = scene({
+                presentation(
+                    "first-window",
+                    PixelRect{10, 10, 100, 100},
+                    AR24,
+                    10,
+                    RenderStage::PreWindow,
+                    41,
+                    TargetKind::Window),
+                presentation(
+                    "second-window",
+                    PixelRect{20, 20, 100, 100},
+                    AR24,
+                    10,
+                    RenderStage::PreWindow,
+                    42,
+                    TargetKind::Window),
+            });
+            const std::array formats{
+                CaptureFormatLayout{AR24, 4},
+            };
+            const auto result = buildCaptureScene(
+                input,
+                formats,
+                limits());
+            require(result.hasValue() &&
+                        result.value().captures.size() == 2U,
+                    "different windows shared pre-window capture state");
+            require(result.value().captures[0]
+                            .key.stageObjectToken == 41U &&
+                        result.value().captures[1]
+                            .key.stageObjectToken == 42U,
+                    "window capture identity was lost");
+        }},
+        Case{"pre-window regions fail without poisoning siblings", [] {
+            const auto input = scene({
+                presentation(
+                    "valid",
+                    PixelRect{10, 10, 20, 20}),
+                presentation(
+                    "invalid-pre-window",
+                    PixelRect{40, 10, 20, 20},
+                    AR24,
+                    10,
+                    RenderStage::PreWindow),
+            });
+            const std::array formats{
+                CaptureFormatLayout{AR24, 4},
+            };
+            const auto result = buildCaptureScene(
+                input,
+                formats,
+                limits());
+            require(result.hasValue(),
+                    "unsupported region discarded its sibling");
+            require(result.value().assignments.size() == 1U,
+                    "valid sibling capture was lost");
+            require(result.value().captureFailures.size() == 1U &&
+                        result.value().captureFailures.front()
+                                .error.code ==
+                            ErrorCode::UnsupportedOperation,
+                    "unsupported pre-window region was not isolated");
         }},
         Case{"unsupported format fails only its presentation", [] {
             const auto input = scene({

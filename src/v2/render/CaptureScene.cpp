@@ -127,7 +127,25 @@ Result<CaptureScene> buildCaptureScene(
             .apronPixels =
                 presentation.sampling.apronPixels,
             .bytesPerPixel = *formatSize,
+            .stageObjectToken =
+                presentation.presentation.key.stage ==
+                        RenderStage::PreWindow
+                    ? presentation.target.attachment.objectToken
+                    : 0U,
         };
+        if (request.stage == RenderStage::PreWindow &&
+            presentation.target.attachment.kind !=
+                TargetKind::Window) {
+            scene.captureFailures.push_back({
+                .key = key,
+                .error = Error{
+                    .code = ErrorCode::UnsupportedOperation,
+                    .path = "target.stage",
+                    .message = "pre-window capture requires an exact window target",
+                },
+            });
+            continue;
+        }
         const std::array oneRequest{request};
         auto required = planCaptures(oneRequest, limits);
         if (!required) {

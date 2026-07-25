@@ -23,6 +23,8 @@ CapturePlan plan(
             .stage = stage,
             .renderFormat = format,
             .colorStateToken = colorState,
+            .stageObjectToken =
+                stage == RenderStage::PreWindow ? 99U : 0U,
         },
         .region = region,
         .bytesPerPixel = 4,

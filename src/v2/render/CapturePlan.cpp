@@ -151,6 +151,20 @@ Result<void> validateCapturePlan(const CapturePlan& plan) {
             "plan.key.stage",
             "unsupported capture stage",
         });
+    if (plan.key.stage == RenderStage::PreWindow &&
+        plan.key.stageObjectToken == 0U)
+        return Result<void>::failure({
+            ErrorCode::InvalidRequest,
+            "plan.key.stage_object_token",
+            "pre-window capture requires an exact window object token",
+        });
+    if (plan.key.stage != RenderStage::PreWindow &&
+        plan.key.stageObjectToken != 0U)
+        return Result<void>::failure({
+            ErrorCode::InvalidRequest,
+            "plan.key.stage_object_token",
+            "global render stages must not carry an object token",
+        });
     if (plan.key.renderFormat == 0U)
         return Result<void>::failure({
             ErrorCode::InvalidRequest,
@@ -222,6 +236,16 @@ Result<std::vector<CapturePlan>> planCaptures(
             });
         if (!validStage(request.stage))
             return invalid(path + ".stage", "unsupported capture stage");
+        if (request.stage == RenderStage::PreWindow &&
+            request.stageObjectToken == 0U)
+            return invalid(
+                path + ".stage_object_token",
+                "pre-window capture requires an exact window object token");
+        if (request.stage != RenderStage::PreWindow &&
+            request.stageObjectToken != 0U)
+            return invalid(
+                path + ".stage_object_token",
+                "global render stages must not carry an object token");
         if (request.coverage.x < 0 || request.coverage.y < 0 ||
             request.coverage.width <= 0 || request.coverage.height <= 0)
             return invalid(path + ".coverage", "expected a non-empty pixel rectangle");
@@ -266,6 +290,7 @@ Result<std::vector<CapturePlan>> planCaptures(
             .stage = request.stage,
             .renderFormat = request.output.snapshot.renderFormat,
             .colorStateToken = request.output.snapshot.colorStateToken,
+            .stageObjectToken = request.stageObjectToken,
         };
         auto required = makePlan(key, expanded, request.bytesPerPixel, limits);
         if (!required)

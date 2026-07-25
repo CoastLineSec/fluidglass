@@ -104,6 +104,7 @@ int main() {
             requests.push_back(differentGeneration);
             auto differentStage = requests.front();
             differentStage.stage = RenderStage::PreWindow;
+            differentStage.stageObjectToken = 42;
             requests.push_back(differentStage);
             auto differentFormat = requests.front();
             differentFormat.output = output(1, AB30);
@@ -118,6 +119,24 @@ int main() {
             require(result.value()[0].key.renderFormat == AR24, "source format was replaced");
             require(result.value()[3].key.renderFormat == AB30, "wide format was replaced");
             require(result.value()[4].key.colorStateToken == 8U, "color state was discarded");
+        }},
+        Case{"pre-window captures are scoped to an exact window", [] {
+            auto first = request(PixelRect{10, 10, 20, 20});
+            first.stage = RenderStage::PreWindow;
+            first.stageObjectToken = 41;
+            auto second = first;
+            second.coverage = PixelRect{15, 15, 20, 20};
+            second.stageObjectToken = 42;
+
+            const auto result = planCaptures(
+                std::array{first, second},
+                limits());
+            require(result.hasValue() &&
+                        result.value().size() == 2U,
+                    "different pre-window objects shared a capture");
+            require(result.value()[0].key.stageObjectToken == 41U &&
+                        result.value()[1].key.stageObjectToken == 42U,
+                    "pre-window object identity was lost");
         }},
         Case{"bounded planner partitions distant compatible requests", [] {
             const std::array requests{
@@ -184,6 +203,25 @@ int main() {
             require(
                 !planCaptures(std::array{malformedStage}, limits()),
                 "unknown render stage was accepted");
+
+            auto unscopedPreWindow =
+                request(PixelRect{0, 0, 10, 10});
+            unscopedPreWindow.stage =
+                RenderStage::PreWindow;
+            require(
+                !planCaptures(
+                    std::array{unscopedPreWindow},
+                    limits()),
+                "unscoped pre-window capture was accepted");
+
+            auto scopedGlobal =
+                request(PixelRect{0, 0, 10, 10});
+            scopedGlobal.stageObjectToken = 9;
+            require(
+                !planCaptures(
+                    std::array{scopedGlobal},
+                    limits()),
+                "global stage accepted an object token");
 
             auto malformedFormatSize = request(PixelRect{0, 0, 10, 10});
             malformedFormatSize.bytesPerPixel = 0;

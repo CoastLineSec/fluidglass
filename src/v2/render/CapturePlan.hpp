@@ -29,6 +29,7 @@ struct CaptureKey {
     RenderStage   stage = RenderStage::PostWindows;
     std::uint32_t renderFormat = 0;
     std::uint64_t colorStateToken = 0;
+    std::uint64_t stageObjectToken = 0;
 
     friend bool operator==(const CaptureKey&, const CaptureKey&) = default;
 };
@@ -39,6 +40,7 @@ struct CaptureRequest {
     PixelRect         coverage;
     std::uint32_t     apronPixels = 0;
     std::uint32_t     bytesPerPixel = 0;
+    std::uint64_t     stageObjectToken = 0;
 };
 
 struct CapturePlan {
