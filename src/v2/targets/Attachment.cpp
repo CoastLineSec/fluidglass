@@ -2,6 +2,7 @@
 
 #include "v2/core/Limits.hpp"
 
+#include <cmath>
 #include <set>
 #include <utility>
 
@@ -56,6 +57,10 @@ Result<std::vector<ResolvedPresentation>> resolvePresentations(
         return invalid("attachment.stage", "unsupported render stage");
     if (attachment.outputFilter && attachment.outputFilter->empty())
         return invalid("attachment.output_filter", "output filter must not be empty");
+    if (!std::isfinite(attachment.opacity) ||
+        attachment.opacity < 0.0 ||
+        attachment.opacity > 1.0)
+        return invalid("attachment.opacity", "expected a finite value from 0 to 1");
     if (outputs.size() > Limits::MAX_PRESENTATIONS_PER_TARGET)
         return invalid(
             "outputs",
@@ -96,6 +101,7 @@ Result<std::vector<ResolvedPresentation>> resolvePresentations(
             },
             .attachmentToken = attachment.objectToken,
             .geometry = std::move(*mapped.value()),
+            .opacity = attachment.opacity,
         });
     }
     return Result<std::vector<ResolvedPresentation>>::success(

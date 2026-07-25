@@ -80,6 +80,7 @@ Result<std::optional<ResolvedAttachment>> resolveRegionAttachment(
             },
             .stage = *target.stage,
             .outputFilter = output.snapshot.name,
+            .opacity = 1.0,
         });
 }
 

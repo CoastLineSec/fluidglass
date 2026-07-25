@@ -21,6 +21,7 @@ struct ResolvedAttachment {
     Rect                       globalGeometry;
     RenderStage                stage = RenderStage::PostWindows;
     std::optional<std::string> outputFilter;
+    double                     opacity = 1.0;
 
     friend bool operator==(const ResolvedAttachment&, const ResolvedAttachment&) = default;
 };
@@ -29,6 +30,7 @@ struct ResolvedPresentation {
     PresentationKey key;
     std::uint64_t    attachmentToken = 0;
     MappedGeometry   geometry;
+    double           opacity = 1.0;
 
     friend bool operator==(const ResolvedPresentation&, const ResolvedPresentation&) = default;
 };

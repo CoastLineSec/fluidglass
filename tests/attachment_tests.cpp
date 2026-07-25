@@ -42,6 +42,7 @@ ResolvedAttachment attachment(Rect geometry) {
         .globalGeometry = geometry,
         .stage = RenderStage::PreWindow,
         .outputFilter = std::nullopt,
+        .opacity = 1.0,
     };
 }
 
@@ -96,6 +97,7 @@ int main() {
             require(result.value().front().attachmentToken == 44U, "attachment token changed");
             require(result.value().front().key.identity == source.identity, "target identity changed");
             require(result.value().front().key.stage == RenderStage::PreWindow, "render stage changed");
+            require(result.value().front().opacity == 1.0, "attachment opacity changed");
         }},
         Case{"invalid attachment fails before output mapping", [] {
             const std::array outputs{output("DP-1", 0.0)};
@@ -104,6 +106,19 @@ int main() {
             const auto result = resolvePresentations(malformed, outputs);
             require(!result, "zero attachment token was accepted");
             require(result.error().path == "attachment.object_token", "wrong attachment failure path");
+        }},
+        Case{"attachment opacity is validated and preserved", [] {
+            const std::array outputs{output("DP-1", 0.0)};
+            auto faded = attachment(Rect{.x = 10.0, .y = 20.0, .width = 30.0, .height = 40.0});
+            faded.opacity = 0.35;
+            const auto result = resolvePresentations(faded, outputs);
+            require(result.hasValue() && result.value().size() == 1U, "faded attachment did not resolve");
+            require(result.value().front().opacity == 0.35, "faded attachment opacity changed");
+
+            faded.opacity = 1.1;
+            const auto invalid = resolvePresentations(faded, outputs);
+            require(!invalid, "invalid attachment opacity was accepted");
+            require(invalid.error().path == "attachment.opacity", "wrong opacity failure path");
         }},
         Case{"duplicate output generation fails closed", [] {
             const std::array outputs{
