@@ -568,7 +568,14 @@ buildGlassDrawPlan(
     return Result<GlassDrawPlan>::success({
         .key = planned.presentation.key,
         .resourceToken = resource.token,
+        .capture = resource.plan,
         .destination = geometry.outputLocal,
+        .destinationPixels = {
+            .x = geometry.outputLocal.x * scale,
+            .y = geometry.outputLocal.y * scale,
+            .width = geometry.outputLocal.width * scale,
+            .height = geometry.outputLocal.height * scale,
+        },
         .damageCoverage = geometry.coverage,
         .sourceCorners = std::move(corners.value()),
         .fullSizePixels = {

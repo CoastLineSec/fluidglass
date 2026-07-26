@@ -54,7 +54,9 @@ struct MaterialUniforms {
 struct GlassDrawPlan {
     PresentationKey                 key;
     std::uint64_t                   resourceToken = 0;
+    CapturePlan                     capture;
     Rect                            destination;
+    Rect                            destinationPixels;
     PixelRect                       damageCoverage;
     std::array<TextureCoordinate, 4> sourceCorners;
     DrawSize                        fullSizePixels;

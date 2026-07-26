@@ -260,9 +260,12 @@ int main() {
             const auto& plan = result.value();
             require(
                 plan.resourceToken == 99 &&
+                    plan.capture == input.resource.plan &&
                     plan.destination ==
                         input.assignment.presentation
                             .presentation.geometry.outputLocal &&
+                    plan.destinationPixels ==
+                        Rect{100.0, 80.0, 240.0, 120.0} &&
                     plan.damageCoverage ==
                         input.assignment.presentation
                             .presentation.geometry.coverage,
@@ -293,6 +296,8 @@ int main() {
                 result.hasValue() &&
                     result.value().fullSizePixels ==
                         DrawSize{250.0, 125.0} &&
+                    result.value().destinationPixels ==
+                        Rect{50.0, 37.5, 250.0, 125.0} &&
                     result.value().clippedSizePixels ==
                         DrawSize{250.0, 125.0},
                 "fractional scale was lost or applied twice");
