@@ -1,6 +1,7 @@
 #include "v2/render/HyprlandGlassPassCoordinator.hpp"
 
 #include "v2/render/GlassFramePlan.hpp"
+#include "v2/render/CaptureExecutionTracker.hpp"
 #include "v2/render/HyprlandCaptureExecutor.hpp"
 #include "v2/render/HyprlandGlassDrawExecutor.hpp"
 #include "v2/render/HyprlandGlassShader.hpp"
@@ -24,7 +25,9 @@ namespace hfg::v2 {
 struct HyprlandGlassPassExecutionState {
   HyprlandCaptureResourceManager resources;
   RenderStageScheduler scheduler;
+  CaptureExecutionTracker captures;
   HyprlandGlassShader shader;
+  std::weak_ptr<GlassPassObserver> observer;
 };
 
 namespace {
@@ -58,13 +61,36 @@ void logUnexpectedPassFailure(std::string_view pass,
   }
 }
 
+void reportCapture(const std::shared_ptr<HyprlandGlassPassExecutionState> &execution,
+                   std::uint64_t resourceToken, std::uint64_t frameToken,
+                   std::optional<Error> error) noexcept {
+  try {
+    if (execution)
+      if (const auto observer = execution->observer.lock())
+        observer->onCaptureResult(resourceToken, frameToken, error);
+  } catch (...) {
+  }
+}
+
+void reportDraw(const std::shared_ptr<HyprlandGlassPassExecutionState> &execution,
+                const PresentationKey &key, std::uint64_t frameToken,
+                std::optional<Error> error) noexcept {
+  try {
+    if (execution)
+      if (const auto observer = execution->observer.lock())
+        observer->onDrawResult(key, frameToken, error);
+  } catch (...) {
+  }
+}
+
 class V2CapturePass final : public IPassElement {
 public:
   V2CapturePass(std::shared_ptr<HyprlandGlassPassExecutionState> execution,
                 std::uint64_t resourceToken, CapturePlan expected,
-                OutputGeneration output)
+                OutputGeneration output, std::uint64_t frameToken)
       : m_execution(std::move(execution)), m_resourceToken(resourceToken),
-        m_expected(std::move(expected)), m_output(std::move(output)) {}
+        m_expected(std::move(expected)), m_output(std::move(output)),
+        m_frameToken(frameToken) {}
 
   bool needsLiveBlur() override { return false; }
   bool needsPrecomputeBlur() override { return false; }
@@ -83,22 +109,53 @@ public:
       const auto *resource =
           m_execution->resources.resourceFor(m_resourceToken);
       if (!resource || !(resource->plan() == m_expected)) {
-        logPassFailure(
-            passName(),
-            {
-                .code = ErrorCode::StaleGeneration,
-                .path = "resource",
-                .message = "capture allocation changed before pass execution",
-            });
+        const Error error{
+            .code = ErrorCode::StaleGeneration,
+            .path = "resource",
+            .message = "capture allocation changed before pass execution",
+        };
+        m_execution->captures.fail(m_resourceToken, m_frameToken);
+        logPassFailure(passName(), error);
+        reportCapture(m_execution, m_resourceToken, m_frameToken, error);
         return {};
       }
       if (auto captured = captureCurrentFramebuffer(*resource, m_output);
-          !captured)
+          !captured) {
+        m_execution->captures.fail(m_resourceToken, m_frameToken);
         logPassFailure(passName(), captured.error());
+        reportCapture(m_execution, m_resourceToken, m_frameToken,
+                      captured.error());
+        return {};
+      }
+      if (auto completed =
+              m_execution->captures.complete(m_resourceToken, m_frameToken);
+          !completed) {
+        logPassFailure(passName(), completed.error());
+        reportCapture(m_execution, m_resourceToken, m_frameToken,
+                      completed.error());
+        return {};
+      }
+      reportCapture(m_execution, m_resourceToken, m_frameToken, std::nullopt);
     } catch (const std::exception &error) {
       logUnexpectedPassFailure(passName(), error.what());
+      const Error failure{
+          .code = ErrorCode::InternalError,
+          .path = "capture",
+          .message = "capture pass raised an unexpected exception",
+      };
+      if (m_execution)
+        m_execution->captures.fail(m_resourceToken, m_frameToken);
+      reportCapture(m_execution, m_resourceToken, m_frameToken, failure);
     } catch (...) {
       logUnexpectedPassFailure(passName(), "non-standard exception");
+      const Error failure{
+          .code = ErrorCode::InternalError,
+          .path = "capture",
+          .message = "capture pass raised an unexpected exception",
+      };
+      if (m_execution)
+        m_execution->captures.fail(m_resourceToken, m_frameToken);
+      reportCapture(m_execution, m_resourceToken, m_frameToken, failure);
     }
     return {};
   }
@@ -108,14 +165,16 @@ private:
   std::uint64_t m_resourceToken = 0;
   CapturePlan m_expected;
   OutputGeneration m_output;
+  std::uint64_t m_frameToken = 0;
 };
 
 class V2GlassPass final : public IPassElement {
 public:
   V2GlassPass(std::shared_ptr<HyprlandGlassPassExecutionState> execution,
-              GlassDrawPlan plan, OutputGeneration output)
+              GlassDrawPlan plan, OutputGeneration output,
+              std::uint64_t frameToken)
       : m_execution(std::move(execution)), m_plan(std::move(plan)),
-        m_output(std::move(output)) {}
+        m_output(std::move(output)), m_frameToken(frameToken) {}
 
   bool needsLiveBlur() override { return false; }
   bool needsPrecomputeBlur() override { return false; }
@@ -134,26 +193,53 @@ public:
         logUnexpectedPassFailure(passName(), "execution state is unavailable");
         return {};
       }
+      if (!m_execution->captures.ready(m_plan.resourceToken, m_frameToken)) {
+        const Error error{
+            .code = ErrorCode::StaleGeneration,
+            .path = "capture",
+            .message =
+                "glass draw was skipped because its capture did not succeed in this frame",
+        };
+        logPassFailure(passName(), error);
+        reportDraw(m_execution, m_plan.key, m_frameToken, error);
+        return {};
+      }
       const auto *resource =
           m_execution->resources.resourceFor(m_plan.resourceToken);
       if (!resource || !(resource->plan() == m_plan.capture)) {
-        logPassFailure(
-            passName(),
-            {
-                .code = ErrorCode::StaleGeneration,
-                .path = "resource",
-                .message = "draw allocation changed before pass execution",
-            });
+        const Error error{
+            .code = ErrorCode::StaleGeneration,
+            .path = "resource",
+            .message = "draw allocation changed before pass execution",
+        };
+        logPassFailure(passName(), error);
+        reportDraw(m_execution, m_plan.key, m_frameToken, error);
         return {};
       }
       if (auto drawn = drawGlass(m_plan, m_plan.resourceToken, *resource,
                                  m_output, m_execution->shader);
-          !drawn)
+          !drawn) {
         logPassFailure(passName(), drawn.error());
+        reportDraw(m_execution, m_plan.key, m_frameToken, drawn.error());
+        return {};
+      }
+      reportDraw(m_execution, m_plan.key, m_frameToken, std::nullopt);
     } catch (const std::exception &error) {
       logUnexpectedPassFailure(passName(), error.what());
+      reportDraw(m_execution, m_plan.key, m_frameToken,
+                 Error{
+                     .code = ErrorCode::InternalError,
+                     .path = "draw",
+                     .message = "glass draw raised an unexpected exception",
+                 });
     } catch (...) {
       logUnexpectedPassFailure(passName(), "non-standard exception");
+      reportDraw(m_execution, m_plan.key, m_frameToken,
+                 Error{
+                     .code = ErrorCode::InternalError,
+                     .path = "draw",
+                     .message = "glass draw raised an unexpected exception",
+                 });
     }
     return {};
   }
@@ -162,6 +248,7 @@ private:
   std::shared_ptr<HyprlandGlassPassExecutionState> m_execution;
   GlassDrawPlan m_plan;
   OutputGeneration m_output;
+  std::uint64_t m_frameToken = 0;
 };
 
 Result<std::vector<PixelRect>>
@@ -217,6 +304,8 @@ HyprlandGlassPassCoordinator::reconcile(const CaptureScene &captures,
     return Result<GlassSceneReconcileResult>::failure(scene.error());
 
   m_scene = scene.value();
+  for (const auto token : resources.value().retiredTokens)
+    m_execution->captures.retire(token);
   return Result<GlassSceneReconcileResult>::success({
       .scene = m_scene,
       .allocationFailures = std::move(resources.value().failures),
@@ -258,6 +347,12 @@ HyprlandGlassPassCoordinator::enqueue(const RenderHookEvent &event) {
   auto scheduled = m_execution->scheduler.schedule(selectedResources, event);
   if (!scheduled)
     return Result<GlassPassEnqueueResult>::failure(scheduled.error());
+  for (const auto &resource : scheduled.value()) {
+    auto tracked = m_execution->captures.schedule(resource.token,
+                                                  event.frameToken);
+    if (!tracked)
+      return Result<GlassPassEnqueueResult>::failure(tracked.error());
+  }
 
   for (const auto index : frame.value().drawIndices)
     if (index >= m_scene.draws.size())
@@ -273,12 +368,14 @@ HyprlandGlassPassCoordinator::enqueue(const RenderHookEvent &event) {
 
   for (const auto &resource : scheduled.value())
     g_pHyprRenderer->m_renderPass.add(makeUnique<V2CapturePass>(
-        m_execution, resource.token, resource.plan, event.output));
+        m_execution, resource.token, resource.plan, event.output,
+        event.frameToken));
   const auto decorationOwned = event.hook == RenderHookStage::PreWindow;
   if (!decorationOwned)
     for (const auto index : frame.value().drawIndices)
       g_pHyprRenderer->m_renderPass.add(makeUnique<V2GlassPass>(
-          m_execution, m_scene.draws[index], event.output));
+          m_execution, m_scene.draws[index], event.output,
+          event.frameToken));
 
   return Result<GlassPassEnqueueResult>::success({
       .capturePasses = scheduled.value().size(),
@@ -318,7 +415,8 @@ HyprlandGlassPassCoordinator::enqueueWindowDecoration(
     auto draw = m_scene.draws[index];
     draw.opacity = opacity;
     g_pHyprRenderer->m_renderPass.add(
-        makeUnique<V2GlassPass>(m_execution, std::move(draw), event.output));
+        makeUnique<V2GlassPass>(m_execution, std::move(draw), event.output,
+                                event.frameToken));
   }
   return Result<GlassPassEnqueueResult>::success({
       .capturePasses = 0,
@@ -333,11 +431,18 @@ const GlassRenderScene &HyprlandGlassPassCoordinator::scene() const noexcept {
   return m_scene;
 }
 
+void HyprlandGlassPassCoordinator::setObserver(
+    std::weak_ptr<GlassPassObserver> observer) noexcept {
+  if (m_execution)
+    m_execution->observer = std::move(observer);
+}
+
 void HyprlandGlassPassCoordinator::clear() noexcept {
   m_scene = {};
   if (!m_execution)
     return;
   m_execution->scheduler.clear();
+  m_execution->captures.clear();
   m_execution->resources.clear();
   m_execution->shader.reset();
 }

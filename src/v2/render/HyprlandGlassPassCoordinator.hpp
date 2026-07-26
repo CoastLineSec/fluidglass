@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <vector>
 
 namespace hfg::v2 {
@@ -28,6 +29,17 @@ struct GlassPassEnqueueResult {
 };
 
 struct HyprlandGlassPassExecutionState;
+
+class GlassPassObserver {
+public:
+  virtual ~GlassPassObserver() = default;
+  virtual void onCaptureResult(std::uint64_t resourceToken,
+                               std::uint64_t frameToken,
+                               const std::optional<Error> &error) noexcept = 0;
+  virtual void onDrawResult(const PresentationKey &key,
+                            std::uint64_t frameToken,
+                            const std::optional<Error> &error) noexcept = 0;
+};
 
 class HyprlandGlassPassCoordinator {
 public:
@@ -54,6 +66,7 @@ public:
 
   [[nodiscard]] const GlassRenderScene &scene() const noexcept;
 
+  void setObserver(std::weak_ptr<GlassPassObserver> observer) noexcept;
   void clear() noexcept;
 
 private:

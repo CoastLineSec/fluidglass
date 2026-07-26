@@ -83,6 +83,7 @@ add_library(hyprfluidglass-v2-core STATIC
     src/v2/render/CaptureBlit.cpp
     src/v2/render/CaptureCache.cpp
     src/v2/render/CaptureEnvironment.cpp
+    src/v2/render/CaptureExecutionTracker.cpp
     src/v2/render/CapturePlan.cpp
     src/v2/render/CaptureResourcePlan.cpp
     src/v2/render/CaptureScene.cpp
@@ -288,6 +289,12 @@ if(BUILD_TESTING)
     target_link_libraries(hyprfluidglass-capture-environment-tests PRIVATE hyprfluidglass-v2-core)
     target_compile_options(hyprfluidglass-capture-environment-tests PRIVATE -Wall -Wextra -Wpedantic)
     add_test(NAME hyprfluidglass-capture-environment COMMAND hyprfluidglass-capture-environment-tests)
+
+    add_executable(hyprfluidglass-capture-execution-tracker-tests tests/capture_execution_tracker_tests.cpp)
+    target_include_directories(hyprfluidglass-capture-execution-tracker-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+    target_link_libraries(hyprfluidglass-capture-execution-tracker-tests PRIVATE hyprfluidglass-v2-core)
+    target_compile_options(hyprfluidglass-capture-execution-tracker-tests PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME hyprfluidglass-capture-execution-tracker COMMAND hyprfluidglass-capture-execution-tracker-tests)
 
     add_executable(hyprfluidglass-render-stage-scheduler-tests tests/render_stage_scheduler_tests.cpp)
     target_include_directories(hyprfluidglass-render-stage-scheduler-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests")
