@@ -104,16 +104,16 @@ int main() {
             require(!validateTarget(std::move(input)), "mismatched selector kind must fail");
         }},
         Case{"layer geometry optional", [] {
-            TargetInput input{
-                .id = "bar",
-                .kind = TargetKind::Layer,
-                .material = {.source = MaterialSource::Session, .name = "bar"},
-                .shape = RoundedRectShape{.radius = 22.0},
-                .selector = LayerSelector{.namespaceName = "example-shell:bar:primary"},
-                .geometry = std::nullopt,
-                .stage = std::nullopt,
-                .transition = std::nullopt,
+            TargetInput input{};
+            input.id = "bar";
+            input.kind = TargetKind::Layer;
+            input.material = MaterialReference{
+                .source = MaterialSource::Session,
+                .name = "bar",
             };
+            input.shape = RoundedRectShape{.radius = 22.0};
+            input.selector =
+                LayerSelector{.namespaceName = "example-shell:bar:primary"};
             require(validateTarget(input).hasValue(), "whole-surface layer target must be valid");
             input.geometry = Rect{.x = 0.0, .y = 0.0, .width = 1000.0, .height = 44.0};
             require(validateTarget(input).hasValue(), "surface-local layer geometry must be valid");

@@ -177,22 +177,20 @@ void applyAutomaticWindowRounding(Shape &shape, double rounding) {
 
 Result<Target> prepareTarget(const LegacyElement &element, std::string targetId,
                              std::string materialName) {
-  TargetInput input{
-      .id = std::move(targetId),
-      .kind = TargetKind::Region,
-      .material =
-          {
-              .source = MaterialSource::Session,
-              .name = std::move(materialName),
-          },
-      .shape = element.shape,
-      .selector = RegionSelector{.output = element.output},
-      .geometry = element.geometry,
-      .stage =
-          element.under ? RenderStage::PostWallpaper : RenderStage::PostWindows,
-      .transition = element.transition,
-      .enabled = element.enabled,
+  TargetInput input{};
+  input.id = std::move(targetId);
+  input.kind = TargetKind::Region;
+  input.material = MaterialReference{
+      .source = MaterialSource::Session,
+      .name = std::move(materialName),
   };
+  input.shape = element.shape;
+  input.selector = RegionSelector{.output = element.output};
+  input.geometry = element.geometry;
+  input.stage =
+      element.under ? RenderStage::PostWallpaper : RenderStage::PostWindows;
+  input.transition = element.transition;
+  input.enabled = element.enabled;
 
   switch (element.attachment) {
   case LegacyAttachmentKind::Region:
