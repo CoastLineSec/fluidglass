@@ -85,6 +85,7 @@ add_library(hyprfluidglass-v2-core STATIC
     src/v2/render/Geometry.cpp
     src/v2/render/GlassDrawPlan.cpp
     src/v2/render/GlassShaderSource.cpp
+    src/v2/render/GlassUniformPayload.cpp
     src/v2/render/MaterialSampling.cpp
     src/v2/render/OutputGeneration.cpp
     src/v2/render/PresentationScene.cpp
@@ -220,6 +221,12 @@ if(BUILD_TESTING)
     target_link_libraries(hyprfluidglass-glass-shader-source-tests PRIVATE hyprfluidglass-v2-core)
     target_compile_options(hyprfluidglass-glass-shader-source-tests PRIVATE -Wall -Wextra -Wpedantic)
     add_test(NAME hyprfluidglass-glass-shader-source COMMAND hyprfluidglass-glass-shader-source-tests)
+
+    add_executable(hyprfluidglass-glass-uniform-payload-tests tests/glass_uniform_payload_tests.cpp)
+    target_include_directories(hyprfluidglass-glass-uniform-payload-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+    target_link_libraries(hyprfluidglass-glass-uniform-payload-tests PRIVATE hyprfluidglass-v2-core)
+    target_compile_options(hyprfluidglass-glass-uniform-payload-tests PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME hyprfluidglass-glass-uniform-payload COMMAND hyprfluidglass-glass-uniform-payload-tests)
 
     add_executable(hyprfluidglass-capture-plan-tests tests/capture_plan_tests.cpp)
     target_include_directories(hyprfluidglass-capture-plan-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests")
