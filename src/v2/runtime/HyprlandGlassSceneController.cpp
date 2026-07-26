@@ -235,6 +235,7 @@ Result<void> HyprlandGlassSceneController::prepareRenderScene() {
 
     m_renderingReady = true;
     m_lastError.reset();
+    publishStatus();
     return Result<void>::success();
 }
 
@@ -360,6 +361,7 @@ void HyprlandGlassSceneController::recordFailure(Error error) noexcept {
     m_lastError = std::move(error);
     m_renderingReady = false;
     clearLiveState();
+    publishStatus();
 }
 
 bool HyprlandGlassSceneController::renderingReady() const noexcept {
@@ -380,6 +382,25 @@ void HyprlandGlassSceneController::clearLiveState() noexcept {
     m_capturePresentations.clear();
 }
 
+void HyprlandGlassSceneController::publishStatus() noexcept {
+    try {
+        const auto& scene = m_passes.scene();
+        m_runtime.setRendererStatus({
+            .renderingReady = m_renderingReady,
+            .renderer = m_renderingReady ? "active" :
+                        (m_lastError ? "failed" : "inactive"),
+            .presentations = m_presentations.presentations.size(),
+            .captureResources = scene.resources.size(),
+            .draws = scene.draws.size(),
+            .windowAttachments =
+                m_attachments ? m_attachments->attached().size() : 0U,
+            .directScanoutLeases = m_scanout.leases().size(),
+            .lastError = m_lastError,
+        });
+    } catch (...) {
+    }
+}
+
 void HyprlandGlassSceneController::clear() noexcept {
     m_passes.setObserver({});
     clearLiveState();
@@ -392,6 +413,8 @@ void HyprlandGlassSceneController::clear() noexcept {
     m_presentations = {};
     m_initialized = false;
     m_renderingReady = false;
+    m_lastError.reset();
+    publishStatus();
 }
 
 } // namespace hfg::v2

@@ -256,10 +256,20 @@ std::set<std::string> configMaterialNames(const ConfigStore& store) {
     return result;
 }
 
-json capabilitiesJson() {
+json errorJson(const std::optional<Error>& error) {
+    if (!error)
+        return nullptr;
+    return {
+        {"code", errorCodeName(error->code)},
+        {"path", error->path},
+        {"message", error->message},
+    };
+}
+
+json capabilitiesJson(const RendererRuntimeStatus& renderer) {
     return {
         {"protocol_versions", json::array({2})},
-        {"rendering_ready", false},
+        {"rendering_ready", renderer.renderingReady},
         {"target_kinds", json::array({"window", "layer", "region"})},
         {"shapes", json::array({"rounded-rect", "ring", "compound"})},
         {"transitions", {
@@ -296,7 +306,8 @@ json capabilitiesJson() {
 json statusJson(
     const ConfigStore& config,
     const SessionManager& sessions,
-    const ReadinessTracker& readiness) {
+    const ReadinessTracker& readiness,
+    const RendererRuntimeStatus& renderer) {
     json sessionList = json::array();
     std::map<std::string_view, std::size_t> readinessTotals;
     for (const auto& snapshot : sessions.snapshots()) {
@@ -333,7 +344,16 @@ json statusJson(
         };
 
     return {
-        {"renderer", "inactive"},
+        {"renderer", {
+            {"state", renderer.renderer},
+            {"rendering_ready", renderer.renderingReady},
+            {"presentations", renderer.presentations},
+            {"capture_resources", renderer.captureResources},
+            {"draws", renderer.draws},
+            {"window_attachments", renderer.windowAttachments},
+            {"direct_scanout_leases", renderer.directScanoutLeases},
+            {"last_error", errorJson(renderer.lastError)},
+        }},
         {"config", {
             {"active", active != nullptr},
             {"enabled", active ? active->enabled : false},
@@ -405,13 +425,15 @@ Result<json> dispatchRequest(
     ConfigStore& config,
     SessionManager& sessions,
     ReadinessTracker& readiness,
+    const RendererRuntimeStatus& renderer,
     std::uint64_t nowMs) {
     return std::visit([&](const auto& body) -> Result<json> {
         using T = std::decay_t<decltype(body)>;
         if constexpr (std::is_same_v<T, CapabilitiesRequest>) {
-            return Result<json>::success(capabilitiesJson());
+            return Result<json>::success(capabilitiesJson(renderer));
         } else if constexpr (std::is_same_v<T, StatusRequest>) {
-            return Result<json>::success(statusJson(config, sessions, readiness));
+            return Result<json>::success(
+                statusJson(config, sessions, readiness, renderer));
         } else if constexpr (std::is_same_v<T, OpenSessionRequest>) {
             auto opened = sessions.open(body.clientId, body.mode, nowMs);
             if (!opened)
@@ -484,7 +506,8 @@ std::string RuntimeService::handle(std::string_view payload, std::uint64_t nowMs
         auto request = parseRequest(payload);
         if (!request)
             return failureResponse(std::nullopt, request.error());
-        auto result = dispatchRequest(request.value(), m_config, m_sessions, m_readiness, nowMs);
+        auto result = dispatchRequest(request.value(), m_config, m_sessions,
+                                      m_readiness, m_rendererStatus, nowMs);
         if (!result)
             return failureResponse(request.value().requestId, result.error());
         return successResponse(request.value().requestId, result.value());
@@ -522,6 +545,14 @@ ReadinessTracker& RuntimeService::readinessTracker() noexcept {
 
 const ReadinessTracker& RuntimeService::readinessTracker() const noexcept {
     return m_readiness;
+}
+
+void RuntimeService::setRendererStatus(RendererRuntimeStatus status) noexcept {
+    m_rendererStatus = std::move(status);
+}
+
+const RendererRuntimeStatus& RuntimeService::rendererStatus() const noexcept {
+    return m_rendererStatus;
 }
 
 void RuntimeService::expireSessions(std::uint64_t nowMs) {

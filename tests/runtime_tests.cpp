@@ -148,6 +148,58 @@ int main() {
             require(result["result"]["transitions"]["compound_parts"] == true,
                     "part transitions are not advertised");
         }},
+        Case{"capabilities and status report the live renderer truthfully", [] {
+            Fixture fixture;
+            fixture.runtime.setRendererStatus({
+                .renderingReady = true,
+                .renderer = "active",
+                .presentations = 3,
+                .captureResources = 2,
+                .draws = 3,
+                .windowAttachments = 1,
+                .directScanoutLeases = 2,
+                .lastError = std::nullopt,
+            });
+            const auto capabilities = call(
+                fixture.runtime,
+                R"({"version":2,"operation":"capabilities"})");
+            require(capabilities["result"]["rendering_ready"] == true,
+                    "live renderer was advertised as inert");
+            const auto status = call(
+                fixture.runtime,
+                R"({"version":2,"operation":"status"})");
+            require(status["result"]["renderer"]["state"] == "active",
+                    "renderer state was not published");
+            require(status["result"]["renderer"]["presentations"] == 3,
+                    "presentation count was not published");
+            require(status["result"]["renderer"]["capture_resources"] == 2,
+                    "capture count was not published");
+            require(status["result"]["renderer"]["last_error"].is_null(),
+                    "successful renderer published an error");
+        }},
+        Case{"renderer failures are structured and sanitized", [] {
+            Fixture fixture;
+            fixture.runtime.setRendererStatus({
+                .renderingReady = false,
+                .renderer = "failed",
+                .lastError = Error{
+                    .code = ErrorCode::UnsupportedOperation,
+                    .path = "renderer",
+                    .message = "OpenGL renderer is unavailable",
+                },
+            });
+            const auto status = call(
+                fixture.runtime,
+                R"({"version":2,"operation":"status"})");
+            const auto& renderer = status["result"]["renderer"];
+            require(renderer["state"] == "failed",
+                    "renderer failure state was lost");
+            require(renderer["last_error"]["code"] ==
+                        "unsupported-operation",
+                    "renderer error code was lost");
+            require(renderer["last_error"]["path"] == "renderer",
+                    "renderer error path was lost");
+        }},
         Case{"session lifecycle and privacy-safe status", [] {
             Fixture fixture;
             const auto opened = open(fixture.runtime);

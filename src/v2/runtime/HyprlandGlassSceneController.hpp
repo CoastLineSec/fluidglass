@@ -66,6 +66,7 @@ class HyprlandGlassSceneController final
                                  const Error& error) noexcept;
     void reconcileReadiness();
     void recordFailure(Error error) noexcept;
+    void publishStatus() noexcept;
     void clearLiveState() noexcept;
 
     HANDLE m_pluginHandle = nullptr;

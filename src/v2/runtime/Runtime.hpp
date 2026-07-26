@@ -5,10 +5,25 @@
 #include "v2/model/Session.hpp"
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 
 namespace hfg::v2 {
+
+struct RendererRuntimeStatus {
+    bool renderingReady = false;
+    std::string renderer = "inactive";
+    std::size_t presentations = 0;
+    std::size_t captureResources = 0;
+    std::size_t draws = 0;
+    std::size_t windowAttachments = 0;
+    std::size_t directScanoutLeases = 0;
+    std::optional<Error> lastError;
+
+    friend bool operator==(const RendererRuntimeStatus&,
+                           const RendererRuntimeStatus&) = default;
+};
 
 class RuntimeService {
   public:
@@ -23,6 +38,8 @@ class RuntimeService {
     [[nodiscard]] const SessionManager& sessionManager() const noexcept;
     [[nodiscard]] ReadinessTracker& readinessTracker() noexcept;
     [[nodiscard]] const ReadinessTracker& readinessTracker() const noexcept;
+    void setRendererStatus(RendererRuntimeStatus status) noexcept;
+    [[nodiscard]] const RendererRuntimeStatus& rendererStatus() const noexcept;
 
   private:
     void expireSessions(std::uint64_t nowMs);
@@ -30,6 +47,7 @@ class RuntimeService {
     ConfigStore      m_config;
     SessionManager   m_sessions;
     ReadinessTracker m_readiness;
+    RendererRuntimeStatus m_rendererStatus;
 };
 
 } // namespace hfg::v2
