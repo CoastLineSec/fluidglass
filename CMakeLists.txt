@@ -87,6 +87,7 @@ add_library(hyprfluidglass-v2-core STATIC
     src/v2/render/OutputGeneration.cpp
     src/v2/render/PresentationScene.cpp
     src/v2/render/RenderStageScheduler.cpp
+    src/v2/render/TransitionMotion.cpp
     src/v2/runtime/Runtime.cpp
     src/v2/targets/Attachment.cpp
     src/v2/targets/LayerAdapter.cpp
@@ -245,6 +246,12 @@ if(BUILD_TESTING)
     target_link_libraries(hyprfluidglass-render-stage-scheduler-tests PRIVATE hyprfluidglass-v2-core)
     target_compile_options(hyprfluidglass-render-stage-scheduler-tests PRIVATE -Wall -Wextra -Wpedantic)
     add_test(NAME hyprfluidglass-render-stage-scheduler COMMAND hyprfluidglass-render-stage-scheduler-tests)
+
+    add_executable(hyprfluidglass-transition-motion-tests tests/transition_motion_tests.cpp)
+    target_include_directories(hyprfluidglass-transition-motion-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+    target_link_libraries(hyprfluidglass-transition-motion-tests PRIVATE hyprfluidglass-v2-core)
+    target_compile_options(hyprfluidglass-transition-motion-tests PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME hyprfluidglass-transition-motion COMMAND hyprfluidglass-transition-motion-tests)
 
     add_executable(
         hyprfluidglass-hyprland-capture-format-tests
