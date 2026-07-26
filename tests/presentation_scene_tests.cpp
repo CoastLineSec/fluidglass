@@ -134,7 +134,8 @@ int main() {
                 targets,
                 &active,
                 std::span<const SessionSnapshot>{},
-                outputs);
+                outputs,
+                0);
             require(result.hasValue(), "presentation scene failed");
             require(result.value().presentations.size() == 2U,
                     "spanning target did not create two presentations");
@@ -166,7 +167,8 @@ int main() {
                 targets,
                 nullptr,
                 sessions,
-                outputs);
+                outputs,
+                0);
             require(result.hasValue() &&
                         result.value().presentations.size() == 1U,
                     "session presentation did not plan");
@@ -205,7 +207,8 @@ int main() {
                 targets,
                 &active,
                 std::span<const SessionSnapshot>{},
-                outputs);
+                outputs,
+                0);
             require(result.hasValue(), "one material failure discarded the scene");
             require(result.value().presentations.size() == 1U,
                     "valid sibling presentation was lost");
@@ -236,7 +239,8 @@ int main() {
                 targets,
                 &active,
                 std::span<const SessionSnapshot>{},
-                outputs);
+                outputs,
+                0);
             require(result.hasValue(), "clipped scene failed");
             require(result.value().presentations.empty(),
                     "clipped target produced a presentation");
@@ -255,7 +259,8 @@ int main() {
                 TargetScene{},
                 &active,
                 std::span<const SessionSnapshot>{},
-                outputs);
+                outputs,
+                0);
             require(!result &&
                         result.error().code ==
                             ErrorCode::StaleGeneration,
@@ -280,7 +285,8 @@ int main() {
                 targets,
                 &active,
                 std::span<const SessionSnapshot>{},
-                std::span<const OutputGeneration>{});
+                std::span<const OutputGeneration>{},
+                0);
             require(!result &&
                         result.error().code == ErrorCode::InvalidTarget,
                     "divergent resolved identity was accepted");
@@ -303,7 +309,8 @@ int main() {
                 targets,
                 nullptr,
                 std::span<const SessionSnapshot>{},
-                std::span<const OutputGeneration>{});
+                std::span<const OutputGeneration>{},
+                0);
             require(result.hasValue(), "empty presentation scene failed");
             require(result.value().inactive == targets.inactive,
                     "inactive state was lost");
@@ -311,6 +318,55 @@ int main() {
                     "suppressed state was lost");
             require(result.value().failures == targets.failures,
                     "resolution failures were lost");
+        }},
+        Case{"target motion resolves before output mapping", [] {
+            const auto active = config();
+            const std::array outputs{
+                output("DP-1", 0.0, 1),
+            };
+            auto moving = target(
+                "config",
+                "moving",
+                MaterialSource::Config,
+                "shared",
+                Rect{10.0, 10.0, 20.0, 20.0});
+            moving.definition.transition = Transition{
+                .id = "enter-1",
+                .phase = TransitionPhase::Enter,
+                .edge = TransitionEdge::Bottom,
+                .durationMs = 200,
+                .elapsedMs = 0,
+                .travel = 20.0,
+                .easing = {},
+            };
+            moving.transitionAnchorMs = 1000;
+            TargetScene targets{
+                .effective = {std::move(moving)},
+                .inactive = {},
+                .suppressed = {},
+                .failures = {},
+            };
+            const auto result = buildPresentationScene(
+                targets,
+                &active,
+                std::span<const SessionSnapshot>{},
+                outputs,
+                1100);
+            require(
+                result.hasValue() &&
+                    result.value().presentations.size() == 1U,
+                "moving target did not produce a presentation");
+            const auto& planned =
+                result.value().presentations.front();
+            require(
+                planned.target.attachment.globalGeometry ==
+                        Rect{10.0, 20.0, 20.0, 20.0} &&
+                    planned.presentation.geometry.outputLocal ==
+                        Rect{10.0, 20.0, 20.0, 20.0} &&
+                    planned.presentation.opacity == 0.5 &&
+                    planned.target.transitionActive &&
+                    planned.motionTimeMs == 1100,
+                "target motion was applied after mapping or lost");
         }},
     });
 }

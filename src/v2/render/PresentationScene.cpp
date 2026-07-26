@@ -2,6 +2,7 @@
 
 #include "v2/core/Limits.hpp"
 #include "v2/targets/MaterialResolver.hpp"
+#include "v2/targets/TargetMotion.hpp"
 
 #include <iterator>
 #include <set>
@@ -40,7 +41,8 @@ buildPresentationScene(
     const TargetScene& targets,
     const ConfigSnapshot* config,
     std::span<const SessionSnapshot> sessions,
-    std::span<const OutputGeneration> outputs) {
+    std::span<const OutputGeneration> outputs,
+    std::uint64_t nowMs) {
     if (targets.effective.size() >
         Limits::MAX_COMPOSITOR_OBJECTS)
         return failure(
@@ -98,8 +100,18 @@ buildPresentationScene(
                 "targets.effective",
                 "effective target identities must be unique");
 
-        auto material = resolveTargetMaterial(
+        auto movingTarget = resolveTargetMotion(
             target,
+            nowMs);
+        if (!movingTarget) {
+            scene.failures.push_back({
+                .identity = identity,
+                .error = movingTarget.error(),
+            });
+            continue;
+        }
+        auto material = resolveTargetMaterial(
+            movingTarget.value(),
             config,
             sessions);
         if (!material) {
@@ -110,7 +122,7 @@ buildPresentationScene(
             continue;
         }
         auto presentations = resolvePresentations(
-            target.attachment,
+            movingTarget.value().attachment,
             outputs);
         if (!presentations) {
             scene.failures.push_back({
@@ -141,19 +153,22 @@ buildPresentationScene(
             }
             auto sampling = resolveMaterialSampling(
                 material.value(),
-                target.attachment.globalGeometry.width,
-                target.attachment.globalGeometry.height,
+                movingTarget.value()
+                    .attachment.globalGeometry.width,
+                movingTarget.value()
+                    .attachment.globalGeometry.height,
                 output->snapshot.scale);
             if (!sampling) {
                 planningFailure = sampling.error();
                 break;
             }
             planned.push_back({
-                .target = target,
+                .target = movingTarget.value(),
                 .material = material.value(),
                 .presentation = std::move(presentation),
                 .output = *output,
                 .sampling = std::move(sampling.value()),
+                .motionTimeMs = nowMs,
             });
         }
         if (planningFailure) {

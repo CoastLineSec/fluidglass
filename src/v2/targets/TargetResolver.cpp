@@ -183,6 +183,9 @@ resolveSessionTargets(
                 .attachment =
                     std::move(*attachment.value()),
                 .roundingPower = 2.0,
+                .transitionAnchorMs =
+                    session.transitionAnchorMs,
+                .transitionActive = false,
             });
         }
     }

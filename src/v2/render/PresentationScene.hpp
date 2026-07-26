@@ -21,6 +21,7 @@ struct PlannedPresentation {
     ResolvedPresentation       presentation;
     OutputGeneration           output;
     MaterialSamplingFootprint  sampling;
+    std::uint64_t              motionTimeMs = 0;
 
     friend bool operator==(
         const PlannedPresentation&,
@@ -43,6 +44,7 @@ buildPresentationScene(
     const TargetScene& targets,
     const ConfigSnapshot* config,
     std::span<const SessionSnapshot> sessions,
-    std::span<const OutputGeneration> outputs);
+    std::span<const OutputGeneration> outputs,
+    std::uint64_t nowMs);
 
 } // namespace hfg::v2

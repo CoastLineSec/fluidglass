@@ -39,6 +39,8 @@ struct ResolvedTarget {
     Target             definition;
     ResolvedAttachment attachment;
     double             roundingPower = 2.0;
+    std::uint64_t      transitionAnchorMs = 0;
+    bool               transitionActive = false;
 
     friend bool operator==(const ResolvedTarget&, const ResolvedTarget&) = default;
 };
