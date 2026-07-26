@@ -31,6 +31,7 @@ struct GlassShaderUniforms {
   GLint partRects = -1;
   GLint partRadii = -1;
   GLint partJunctions = -1;
+  GLint partMaterialExtents = -1;
   GLint partOpacity = -1;
   GLint connectorCount = -1;
   GLint connectorRects = -1;

@@ -49,6 +49,7 @@ uniform int uPartCount;
 uniform vec4 uPartRects[MAX_PARTS];
 uniform vec4 uPartRadii[MAX_PARTS];
 uniform vec4 uPartJunctions[MAX_PARTS];
+uniform vec4 uPartMaterialExtents[MAX_PARTS];
 uniform float uPartOpacity[MAX_PARTS];
 uniform int uConnectorCount;
 uniform vec4 uConnectorRects[MAX_CONNECTORS];
@@ -230,10 +231,7 @@ float compoundCoverage(vec2 pixel, float antialias) {
             uRoundingPower);
         float partCoverage =
             1.0 - smoothstep(-antialias, antialias, distance);
-        coverage = max(
-            coverage,
-            partCoverage *
-                clamp(uPartOpacity[index], 0.0, 1.0));
+        coverage = max(coverage, partCoverage);
     }
     for (int index = 0; index < MAX_CONNECTORS; ++index) {
         if (index >= uConnectorCount)
@@ -411,8 +409,44 @@ void main() {
         vec3(0.0),
         rim * horizontal * uSpecular);
 
+    float materialOpacity = 1.0;
+    if (uShapeKind == 2) {
+        float cutoutInterior = 1.0;
+        if (uCutoutEnabled != 0) {
+            float cutoutDistance = roundedRectDistance(
+                localPixel,
+                uCutoutRect,
+                uCutoutRadii,
+                uRoundingPower);
+            cutoutInterior =
+                1.0 - smoothstep(-12.0, 0.0, cutoutDistance);
+        }
+        for (int index = 0; index < MAX_PARTS; ++index) {
+            if (index >= uPartCount)
+                break;
+            float partOpacity =
+                clamp(uPartOpacity[index], 0.0, 1.0);
+            if (partOpacity >= 0.999)
+                continue;
+            float extentDistance = rectangleDistance(
+                localPixel,
+                uPartMaterialExtents[index]);
+            float influence =
+                (1.0 - smoothstep(
+                    0.0,
+                    24.0,
+                    max(extentDistance, 0.0))) *
+                cutoutInterior;
+            materialOpacity = min(
+                materialOpacity,
+                mix(1.0, partOpacity, influence));
+        }
+    }
+
     float alpha =
-        clamp(uOpacity, 0.0, 1.0) * coverage;
+        clamp(uOpacity, 0.0, 1.0) *
+        coverage *
+        materialOpacity;
     fragColor = vec4(glass * alpha, alpha);
 }
 )GLSL";

@@ -32,6 +32,7 @@ int main() {
                      "uPartRects",
                      "uPartRadii",
                      "uPartJunctions",
+                     "uPartMaterialExtents",
                      "uPartOpacity",
                      "uConnectorRects",
                      "uConnectorCurve",
@@ -92,6 +93,16 @@ int main() {
                 source.contains(
                     "fragColor = vec4(glass * alpha, alpha)"),
                 "shader output is not premultiplied");
+        }},
+        Case{"compound opacity follows material extents", [] {
+            const auto source = glassFragmentShaderSource();
+            require(
+                source.contains("uPartMaterialExtents[index]") &&
+                    source.contains("materialOpacity") &&
+                    source.contains("cutoutInterior") &&
+                    source.contains("coverage *") &&
+                    source.contains("materialOpacity"),
+                "compound material extent or opacity handling is missing");
         }},
     });
 }
