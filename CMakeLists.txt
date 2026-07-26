@@ -71,6 +71,7 @@ set_target_properties(hyprfluidglass PROPERTIES
 install(TARGETS hyprfluidglass LIBRARY DESTINATION lib/hyprland)
 
 add_library(hyprfluidglass-v2-core STATIC
+    src/v2/compat/LegacyCompatibility.cpp
     src/v2/core/OpaqueId.cpp
     src/v2/ipc/Protocol.cpp
     src/v2/model/Config.cpp
@@ -147,6 +148,12 @@ if(BUILD_TESTING)
     )
     target_compile_options(hyprfluidglass-core-tests PRIVATE -Wall -Wextra -Wpedantic)
     add_test(NAME hyprfluidglass-core COMMAND hyprfluidglass-core-tests)
+
+    add_executable(hyprfluidglass-legacy-compatibility-tests tests/legacy_compatibility_tests.cpp)
+    target_include_directories(hyprfluidglass-legacy-compatibility-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+    target_link_libraries(hyprfluidglass-legacy-compatibility-tests PRIVATE hyprfluidglass-v2-core)
+    target_compile_options(hyprfluidglass-legacy-compatibility-tests PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME hyprfluidglass-legacy-compatibility COMMAND hyprfluidglass-legacy-compatibility-tests)
 
     add_executable(hyprfluidglass-opaque-id-tests tests/opaque_id_tests.cpp)
     target_include_directories(hyprfluidglass-opaque-id-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests")
