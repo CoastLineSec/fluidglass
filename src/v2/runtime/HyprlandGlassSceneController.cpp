@@ -3,7 +3,9 @@
 #include "v2/render/CaptureScene.hpp"
 #include "v2/runtime/LiveScenePlan.hpp"
 
+#include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/helpers/Monitor.hpp>
+#include <hyprland/src/render/Renderer.hpp>
 
 #include <algorithm>
 #include <set>
@@ -31,6 +33,17 @@ ReadinessState readinessFailureState(const Error& error,
         error.code == ErrorCode::UnsupportedTarget)
         return ReadinessState::Unsupported;
     return ReadinessState::Unresolved;
+}
+
+using PresentationMembership =
+    std::set<std::pair<PresentationKey, std::uint64_t>>;
+
+PresentationMembership membershipOf(const PresentationScene& scene) {
+    PresentationMembership result;
+    for (const auto& planned : scene.presentations)
+        result.emplace(planned.presentation.key,
+                       planned.presentation.attachmentToken);
+    return result;
 }
 
 } // namespace
@@ -191,10 +204,17 @@ Result<void> HyprlandGlassSceneController::refreshResolvedScene(
         return attached;
     }
 
+    const auto membershipChanged =
+        membershipOf(m_presentations) !=
+        membershipOf(presentations.value());
     m_currentOutputs = std::move(outputs.value().current);
     m_targets = std::move(targets.value());
     m_presentations = std::move(presentations.value());
     reconcileReadiness();
+    if (membershipChanged && g_pHyprRenderer && g_pCompositor)
+        for (const auto& monitor : g_pCompositor->m_monitors)
+            if (monitor)
+                g_pHyprRenderer->damageMonitor(monitor);
     return Result<void>::success();
 }
 

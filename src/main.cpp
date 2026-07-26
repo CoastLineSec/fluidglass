@@ -51,6 +51,7 @@
 
 #include "v2/config/LuaConfig.hpp"
 #include "v2/core/OpaqueId.hpp"
+#include "v2/runtime/HyprlandGlassSceneController.hpp"
 #include "v2/runtime/Runtime.hpp"
 
 #include <algorithm>
@@ -90,9 +91,11 @@ SP<SHyprCtlCommand> g_debugCommand;
 SP<SHyprCtlCommand> g_debugVerboseCommand;
 SP<SHyprCtlCommand> g_v2Command;
 CHyprSignalListener g_renderStageListener;
+CHyprSignalListener g_v2PreChecksListener;
 CHyprSignalListener g_v2ConfigPreReloadListener;
 CHyprSignalListener g_v2ConfigReloadedListener;
 std::unique_ptr<hfg::v2::RuntimeService> g_v2Runtime;
+std::shared_ptr<hfg::v2::HyprlandGlassSceneController> g_v2Controller;
 bool                g_v2LuaFunctionRegistered = false;
 
 // ── P4 readiness contract (hgsglass event + per-descriptor readiness) ─────────
@@ -2558,6 +2561,8 @@ void renderFluidGlassImpl(eRenderStage stage) {
     g_lastRenderStatus = "ok";
 }
 
+bool v2HasPotentialScene();
+
 void renderFluidGlass(eRenderStage stage) {
     try {
         renderFluidGlassImpl(stage);
@@ -2566,12 +2571,46 @@ void renderFluidGlass(eRenderStage stage) {
     } catch (...) {
         recordBoundaryFailure("render-stage", "non-standard exception");
     }
+    try {
+        if (g_v2Controller && v2HasPotentialScene()) {
+            const auto nowMs = static_cast<std::uint64_t>(
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now().time_since_epoch())
+                    .count());
+            if (auto rendered = g_v2Controller->onRenderStage(stage, nowMs);
+                !rendered)
+                recordBoundaryFailure("v2-render-stage",
+                                      rendered.error().message.c_str());
+        }
+    } catch (const std::exception& error) {
+        recordBoundaryFailure("v2-render-stage", error.what());
+    } catch (...) {
+        recordBoundaryFailure("v2-render-stage", "non-standard exception");
+    }
 }
 
 void damageAllMonitors() {
     if (!g_pHyprRenderer) return;
     for (const auto& m : g_pCompositor->m_monitors)
         if (m) g_pHyprRenderer->damageMonitor(m);
+}
+
+bool v2HasPotentialScene() {
+    if (!g_v2Runtime)
+        return false;
+    if (g_v2Runtime->sessionManager().targetCount() != 0U)
+        return true;
+    const auto* config = g_v2Runtime->configStore().active();
+    if (config && config->enabled &&
+        (!config->windowRules.empty() || !config->layerRules.empty()))
+        return true;
+    const auto& renderer = g_v2Runtime->rendererStatus();
+    return !renderer.renderingReady ||
+        renderer.presentations != 0U ||
+        renderer.captureResources != 0U ||
+        renderer.draws != 0U ||
+        renderer.windowAttachments != 0U ||
+        renderer.directScanoutLeases != 0U;
 }
 
 bool samePartRects(const std::vector<GlassElement::PartRect>& a, const std::vector<GlassElement::PartRect>& b) {
@@ -3458,9 +3497,32 @@ std::string onV2(eHyprCtlOutputFormat, std::string req) {
             return std::string(UNAVAILABLE);
         const auto nowMs = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now().time_since_epoch()).count());
-        return g_v2Runtime->handle(
-            removePrefix(std::move(req), "hyprfluidglass"),
-            nowMs);
+        auto payload = removePrefix(std::move(req), "hyprfluidglass");
+        const auto request = json::parse(payload, nullptr, false, true);
+        const auto operation =
+            request.is_object() && request.contains("operation") &&
+                    request["operation"].is_string()
+                ? request["operation"].get<std::string>()
+                : std::string{};
+        const bool changesScene =
+            operation == "session.replace" ||
+            operation == "session.close";
+        auto response = g_v2Runtime->handle(payload, nowMs);
+        if (changesScene && g_v2Controller) {
+            const auto parsed = json::parse(
+                response, nullptr, false, true);
+            if (!parsed.is_discarded() &&
+                parsed.value("ok", false)) {
+                const auto refreshed =
+                    g_v2Controller->refresh(nowMs);
+                if (!refreshed)
+                    recordBoundaryFailure(
+                        "v2-request-refresh",
+                        refreshed.error().message.c_str());
+                damageAllMonitors();
+            }
+        }
+        return response;
     } catch (...) {
         return std::string(UNAVAILABLE);
     }
@@ -3516,7 +3578,19 @@ void onV2ConfigReloaded() noexcept {
     try {
         if (g_v2Runtime) {
             const auto committed = g_v2Runtime->configStore().commitReload();
-            static_cast<void>(committed);
+            if (committed && g_v2Controller) {
+                const auto nowMs = static_cast<std::uint64_t>(
+                    std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now().time_since_epoch())
+                        .count());
+                const auto refreshed =
+                    g_v2Controller->refresh(nowMs);
+                if (!refreshed)
+                    recordBoundaryFailure(
+                        "v2-config-refresh",
+                        refreshed.error().message.c_str());
+                damageAllMonitors();
+            }
         }
     } catch (...) {
     }
@@ -3559,6 +3633,28 @@ APICALL EXPORT std::string PLUGIN_API_VERSION() { return HYPRLAND_API_VERSION; }
 APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     g_handle = handle;
     g_v2Runtime = std::make_unique<hfg::v2::RuntimeService>(hfg::v2::secureOpaqueId);
+    {
+        const auto controller =
+            hfg::v2::HyprlandGlassSceneController::create(
+                handle, *g_v2Runtime,
+                {
+                    .maxApronPixels = 2048U,
+                    .maxPixels = 64U * 1024U * 1024U,
+                    .maxBytes = 256U * 1024U * 1024U,
+                    .maxTotalBytes = 512U * 1024U * 1024U,
+                });
+        if (controller)
+            g_v2Controller = controller.value();
+        else {
+            g_v2Runtime->setRendererStatus({
+                .renderingReady = false,
+                .renderer = "failed",
+                .lastError = controller.error(),
+            });
+            recordBoundaryFailure("v2-controller-init",
+                                  controller.error().message.c_str());
+        }
+    }
 
     // P4: unique-per-load generation nonce (steady-clock ms — kept within JS's
     // safe-integer range so the shell compares it exactly). The shell keys reload
@@ -3603,6 +3699,18 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         g_glassTimer = makeShared<CEventLoopTimer>(std::chrono::milliseconds(200), [](SP<CEventLoopTimer> self, void*) {
             try {
                 glassScan();
+                if (g_v2Controller && v2HasPotentialScene()) {
+                    const auto nowMs = static_cast<std::uint64_t>(
+                        std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::steady_clock::now().time_since_epoch())
+                            .count());
+                    const auto refreshed =
+                        g_v2Controller->refresh(nowMs);
+                    if (!refreshed)
+                        recordBoundaryFailure(
+                            "v2-runtime-tick",
+                            refreshed.error().message.c_str());
+                }
                 if (self)
                     self->updateTimeout(glassNextInterval());
             } catch (const std::exception& error) {
@@ -3618,8 +3726,39 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         g_pEventLoopManager->addTimer(g_glassTimer);
     }
 
-    if (Event::bus())
+    if (Event::bus()) {
+        if (g_v2Controller)
+            g_v2PreChecksListener =
+                Event::bus()->m_events.render.preChecks.listen(
+                    [](PHLMONITOR monitor) {
+                        try {
+                            if (!g_v2Controller ||
+                                !v2HasPotentialScene())
+                                return;
+                            const auto nowMs = static_cast<std::uint64_t>(
+                                std::chrono::duration_cast<
+                                    std::chrono::milliseconds>(
+                                    std::chrono::steady_clock::now()
+                                        .time_since_epoch())
+                                    .count());
+                            if (auto checked =
+                                    g_v2Controller->onPreChecks(
+                                        std::move(monitor), nowMs);
+                                !checked)
+                                recordBoundaryFailure(
+                                    "v2-render-precheck",
+                                    checked.error().message.c_str());
+                        } catch (const std::exception& error) {
+                            recordBoundaryFailure("v2-render-precheck",
+                                                  error.what());
+                        } catch (...) {
+                            recordBoundaryFailure(
+                                "v2-render-precheck",
+                                "non-standard exception");
+                        }
+                    });
         g_renderStageListener = Event::bus()->m_events.render.stage.listen(renderFluidGlass);
+    }
 
     // P4: the initial readiness snapshot is emitted by the FIRST glassScan tick
     // (~200ms) rather than a synchronous postEvent here — a direct emit at
@@ -3637,6 +3776,11 @@ APICALL EXPORT void PLUGIN_EXIT() {
         HyprlandAPI::removeLuaFunction(g_handle, "hyprfluidglass", "configure");
     g_v2LuaFunctionRegistered = false;
     g_renderStageListener.reset();
+    g_v2PreChecksListener.reset();
+    if (g_v2Controller) {
+        g_v2Controller->clear();
+        g_v2Controller.reset();
+    }
     // P4: farewell event so the shell learns of an orderly teardown immediately
     // (its strict readiness must drop; visual recovery must not await the poll).
     if (g_pEventManager) {
