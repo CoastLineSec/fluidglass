@@ -1,8 +1,7 @@
 # Runtime protocol reference
 
-Availability: the v2 control plane is available in current development builds.
-Clients must check `rendering_ready` before expecting submitted targets to
-draw.
+Availability: the v2 control plane and renderer are active. Clients must still
+check `rendering_ready` before expecting submitted targets to draw.
 
 The runtime protocol lets shells and other local clients create temporary
 glass targets without editing Hyprland configuration. It is generic: every
@@ -92,7 +91,7 @@ Response fields include:
   "version": 2,
   "result": {
     "protocol_versions": [2],
-    "rendering_ready": false,
+    "rendering_ready": true,
     "target_kinds": ["window", "layer", "region"],
     "shapes": ["rounded-rect", "ring", "compound"],
     "transitions": {
@@ -127,8 +126,41 @@ Response fields include:
 ```
 
 Clients must query capabilities instead of inferring feature support from the
-plugin build version. `rendering_ready` is `false` while the v2 control plane is
-available but the v2 renderer is not accepting live presentations.
+plugin build version. `rendering_ready` becomes `true` after the compositor
+render path has initialized. A `false` value indicates startup or runtime
+failure, not permission to assume that retained targets are visible.
+
+## Status
+
+Request:
+
+```json
+{
+  "version": 2,
+  "operation": "status"
+}
+```
+
+The `renderer` object reports live render-path state without exposing session
+tokens:
+
+```json
+{
+  "state": "active",
+  "rendering_ready": true,
+  "presentations": 2,
+  "capture_resources": 1,
+  "draws": 2,
+  "window_attachments": 0,
+  "direct_scanout_leases": 1,
+  "last_error": null
+}
+```
+
+`state` is `inactive`, `active`, or `failed`. When it is `failed`,
+`last_error` contains a structured `code`, `path`, and sanitized `message`.
+Counts describe the last reconciled scene and are diagnostic rather than an
+ownership API.
 
 ## Opening a session
 

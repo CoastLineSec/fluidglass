@@ -11,19 +11,19 @@ project [README](../README.md).
 
 ## V2 reference
 
-The v2 control plane and Lua configuration entry point are available in current
-development builds. The renderer contract is published so shell and
-integration authors can prepare against the same versioned interface:
+The v2 control plane, renderer, and Lua configuration entry point are active.
+Shell and integration authors should use the versioned interface:
 
 - [Architecture](architecture/v2-overview.md)
 - [Target resolution](architecture/target-resolution.md)
 - [Rendering and geometry](architecture/rendering-contract.md)
 - [Lua configuration](reference/lua-configuration.md)
 - [Runtime protocol](reference/runtime-protocol.md)
+- [Migrate from v1](guides/migration-v1-to-v2.md)
 
 Check `capabilities.rendering_ready` before expecting a v2 target to draw. A
-`false` value means the control plane can validate and retain state while the
-v2 renderer remains inactive.
+`false` value means the render path has not initialized successfully. Inspect
+the structured renderer error returned by `status` before publishing targets.
 
 ## Integration guides
 

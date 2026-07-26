@@ -84,9 +84,10 @@ when iterating, since Hyprland's loader caches plugins by path.
 
 ## Usage
 
-The plugin keeps the v1 compatibility commands and also exposes the versioned
-v2 control plane. The current renderer continues to use v1 elements until the
-v2 capability response reports `rendering_ready: true`.
+The plugin keeps the v1 compatibility commands and exposes the active,
+versioned v2 control plane. New clients should use v2 sessions. Existing v1
+clients continue to render through the compatibility path during the
+deprecation window.
 
 | Command | Purpose |
 |---|---|
@@ -100,6 +101,8 @@ See the [runtime protocol reference](docs/reference/runtime-protocol.md) for
 session-based v2 requests. Clients must query `capabilities` before submitting
 v2 render targets. Durable v2 materials and application/layer attachment rules
 use the [native Lua configuration interface](docs/reference/lua-configuration.md).
+Existing integrations can follow the
+[v1-to-v2 migration guide](docs/guides/migration-v1-to-v2.md).
 
 ### Apply payload
 
@@ -161,6 +164,20 @@ glass," and the look is resolution-independent. `glassLevel` maps to blur
 
 ## How it works
 
+The v2 renderer resolves each target against compositor-owned window, layer, or
+output state. It maps the resolved geometry into the output's physical render
+space, allocates a bounded capture around the material's sampling footprint,
+and inserts capture and glass passes at the requested render stage. Window
+targets render from a compositor decoration below the application surface.
+
+Captures are keyed by output generation, render format, color-state identity,
+stage, and stage object. A draw is skipped unless its capture succeeded in the
+same frame. Outputs carrying active glass targets receive a scoped
+direct-scanout inhibition lease so Hyprland cannot bypass the compositor render
+path while the effect is needed.
+
+The v1 compatibility renderer uses its established full-frame path:
+
 1. A `CCapturePass` copies the monitor's current framebuffer into a feedback-safe
    texture at `RENDER_POST_WINDOWS`.
 2. For each element on that monitor, a `CGlassPass` runs the fluid-glass fragment
@@ -168,8 +185,8 @@ glass," and the look is resolution-independent. `glassLevel` maps to blur
 3. The element's area is re-damaged each frame so frost/refraction recompute
    cleanly without leaving stale window edges.
 
-Element corners are mapped through the inverse monitor transform, so rotated and
-flipped outputs render correctly.
+Both paths map through the output transform so rotated and flipped outputs
+render correctly.
 
 ## Versioning
 

@@ -1,8 +1,8 @@
 # Lua configuration reference
 
-Availability: the native v2 Lua configuration entry point is available in
-current development builds. The v2 renderer remains inactive until
-`capabilities.rendering_ready` reports `true`.
+Availability: the native v2 Lua configuration entry point and renderer are
+active. Check `capabilities.rendering_ready` before relying on configured
+targets.
 
 HyprFluidGlass v2 uses Hyprland's native Lua configuration API for durable
 materials and attachment rules. Runtime shells should use the session API

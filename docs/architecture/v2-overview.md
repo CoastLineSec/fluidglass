@@ -279,9 +279,11 @@ invalidate the generation and retire the old resources.
 
 ## Compatibility
 
-The current v1 dispatchers remain temporarily available through a compatibility
-adapter. The adapter translates v1 payloads into a reserved v2 owner and uses
-the same v2 model and renderer. It is not a second rendering implementation.
+The current v1 dispatchers and renderer remain temporarily available while
+clients migrate. A bounded compatibility translator validates how legacy
+window, layer, and region targets map into the reserved v2 owner
+`client:compatibility-v1:reserved`. The translator does not grant the legacy
+path additional authority, and v1 and v2 state never share an owner.
 
 The adapter will be removed only after:
 

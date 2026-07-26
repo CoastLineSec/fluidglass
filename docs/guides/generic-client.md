@@ -41,8 +41,8 @@ hfg_request '{"version":2,"operation":"capabilities"}'
 ```
 
 The capabilities result must contain `"rendering_ready": true` before a client
-expects v2 targets to draw. A false value means requests can be validated and
-retained while the v2 renderer remains inactive.
+expects v2 targets to draw. If it is false, query `status` and surface the
+structured renderer error instead of making the client UI transparent.
 
 ## Complete region example
 
