@@ -147,8 +147,10 @@ Configuration reloads are fail-safe:
 1. Hyprland's `preReload` event creates an empty staging transaction.
 2. `configure()` validates and stores one complete pending snapshot.
 3. Hyprland's `reloaded` event commits the pending snapshot.
-4. If no valid v2 snapshot was received, the last known-good configuration
-   remains active.
+4. If no v2 snapshot was provided, the last known-good configuration remains
+   active without error. If `configure()` was called with invalid data, the
+   last known-good configuration remains active and the reload reports the
+   validation error.
 
 An invalid `configure()` call becomes a Hyprland Lua configuration error. The
 same failure remains available as `config.last_reload_error` in the v2

@@ -140,11 +140,13 @@ int main() {
             require(store.stage(validConfig()).hasValue(), "valid configuration did not stage");
             require(store.commitReload().hasValue(), "valid configuration did not commit");
             store.beginReload();
-            require(!store.commitReload(), "empty reload unexpectedly committed");
+            const auto unchanged = store.commitReload();
+            require(unchanged.hasValue() && unchanged.value() == 1,
+                    "empty optional reload did not preserve the active generation");
             require(store.active() && store.active()->defaultMaterial == "fluid",
                     "empty reload cleared active state");
-            require(store.pendingError().has_value(), "empty reload failure was not retained");
-            require(store.pendingError()->path == "config", "empty reload error path changed");
+            require(!store.pendingError().has_value(),
+                    "empty optional reload published a spurious error");
 
             store.beginReload();
             require(store.stage(validConfig()).hasValue(), "recovery configuration did not stage");

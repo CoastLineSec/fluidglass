@@ -325,18 +325,28 @@ int main() {
             require(fixture.runtime.configStore().commitReload().hasValue(),
                     "config commit failed");
 
+            ConfigSnapshotInput invalid{
+                .version = 2,
+                .enabled = true,
+                .defaultMaterial = "missing",
+                .materials = {{"global", {}}},
+                .windowRules = {},
+                .layerRules = {},
+            };
             fixture.runtime.configStore().beginReload();
+            require(!fixture.runtime.configStore().stage(std::move(invalid)),
+                    "invalid config unexpectedly staged");
             require(!fixture.runtime.configStore().commitReload(),
-                    "empty config reload unexpectedly committed");
+                    "invalid config reload unexpectedly committed");
 
             const auto status = call(fixture.runtime, R"({"version":2,"operation":"status"})");
             require(status["result"]["config"]["active"] == true,
                     "failed reload removed the active config");
             require(status["result"]["config"]["generation"] == 1,
                     "failed reload changed the config generation");
-            require(status["result"]["config"]["last_reload_error"]["code"] == "invalid-request",
+            require(status["result"]["config"]["last_reload_error"]["code"] == "invalid-material",
                     "status omitted the config reload error");
-            require(status["result"]["config"]["last_reload_error"]["path"] == "config",
+            require(status["result"]["config"]["last_reload_error"]["path"] == "default_material",
                     "status changed the config reload error path");
         }},
         Case{"failed replacement preserves live state and readiness", [] {

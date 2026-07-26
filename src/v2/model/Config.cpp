@@ -195,13 +195,9 @@ Result<void> ConfigStore::stage(ConfigSnapshotInput input) {
 
 Result<std::uint64_t> ConfigStore::commitReload() {
     if (!m_pending) {
-        if (!m_pendingError)
-            m_pendingError = Error{
-                .code = ErrorCode::InvalidRequest,
-                .path = "config",
-                .message = "reload did not provide a valid v2 configuration",
-            };
-        return Result<std::uint64_t>::failure(*m_pendingError);
+        if (m_pendingError)
+            return Result<std::uint64_t>::failure(*m_pendingError);
+        return Result<std::uint64_t>::success(m_generation);
     }
     m_active = std::move(m_pending);
     m_pending.reset();
