@@ -41,6 +41,7 @@ struct SessionSnapshot {
     SessionMode                    mode = SessionMode::Client;
     std::uint64_t                  generation = 0;
     std::uint64_t                  expiresAtMs = 0;
+    std::uint64_t                  transitionAnchorMs = 0;
     std::map<std::string, Material> materials;
     std::vector<Target>            targets;
 };
@@ -98,6 +99,7 @@ class SessionManager {
         std::uint64_t                  generation = 0;
         std::uint64_t                  leaseMs = 0;
         std::uint64_t                  expiresAtMs = 0;
+        std::uint64_t                  transitionAnchorMs = 0;
         std::map<std::string, Material> materials;
         std::vector<Target>            targets;
     };

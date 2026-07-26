@@ -46,6 +46,73 @@ Target target(std::string id, MaterialSource source, std::string materialName) {
     return result.value();
 }
 
+Target transitioningTarget(
+    std::string id,
+    std::string transitionId,
+    std::uint64_t elapsedMs = 0) {
+    auto input = target(
+        std::move(id),
+        MaterialSource::Session,
+        "glass");
+    input.transition = Transition{
+        .id = std::move(transitionId),
+        .phase = TransitionPhase::Enter,
+        .edge = TransitionEdge::Bottom,
+        .durationMs = 200,
+        .elapsedMs = elapsedMs,
+        .travel = 40.0,
+        .easing = {},
+    };
+    return input;
+}
+
+Target transitioningCompoundTarget(
+    std::string transitionId,
+    std::uint64_t elapsedMs = 0) {
+    CompoundShape shape;
+    shape.parts.push_back({
+        .rect = {0.0, 0.0, 100.0, 40.0},
+        .corners = {},
+        .junctions = {},
+        .materialExtent = std::nullopt,
+        .transition = PartTransition{
+            .motion = Transition{
+                .id = std::move(transitionId),
+                .phase = TransitionPhase::Enter,
+                .edge = TransitionEdge::Top,
+                .durationMs = 200,
+                .elapsedMs = elapsedMs,
+                .travel = 40.0,
+                .easing = {},
+            },
+            .protrusion = 20.0,
+        },
+        .opacity = 1.0,
+    });
+    auto result = validateTarget({
+        .id = "compound",
+        .kind = TargetKind::Region,
+        .material = {
+            .source = MaterialSource::Session,
+            .name = "glass",
+        },
+        .shape = std::move(shape),
+        .selector = RegionSelector{.output = "DP-1"},
+        .geometry = Rect{
+            .x = 0.0,
+            .y = 0.0,
+            .width = 100.0,
+            .height = 80.0,
+        },
+        .stage = RenderStage::PostWindows,
+        .transition = std::nullopt,
+    });
+    if (!result)
+        throw hfg::test::Failure(
+            "compound target failed validation");
+    return result.value();
+}
+
 struct Fixture {
     IdSequence ids;
     SessionManager manager{[this] {
@@ -211,6 +278,252 @@ int main() {
             };
             require(!fixture.manager.replace(handle.sessionId, handle.token, replacement, {}, 1),
                     "material alias must fail");
+        }},
+        Case{"replacement anchors transition timing", [] {
+            Fixture fixture;
+            const auto handle =
+                fixture.manager.open(
+                    "shell",
+                    SessionMode::Client,
+                    10).value();
+            SessionReplacement replacement{
+                .generation = 1,
+                .materials = {
+                    {"glass", material("glass")},
+                },
+                .targets = {
+                    transitioningTarget(
+                        "bar",
+                        "enter-1",
+                        40),
+                },
+            };
+            const auto result = fixture.manager.replace(
+                handle.sessionId,
+                handle.token,
+                std::move(replacement),
+                {},
+                100);
+            require(
+                result.hasValue() &&
+                    result.value().transitionAnchorMs == 100 &&
+                    result.value().targets.front()
+                            .transition->elapsedMs ==
+                        40,
+                "replacement did not anchor client elapsed time");
+        }},
+        Case{"same transition id preserves compositor progress", [] {
+            Fixture fixture;
+            const auto handle =
+                fixture.manager.open(
+                    "shell",
+                    SessionMode::Client,
+                    0).value();
+            SessionReplacement first{
+                .generation = 1,
+                .materials = {
+                    {"glass", material("glass")},
+                },
+                .targets = {
+                    transitioningTarget(
+                        "bar",
+                        "enter-1",
+                        40),
+                },
+            };
+            require(
+                fixture.manager.replace(
+                    handle.sessionId,
+                    handle.token,
+                    std::move(first),
+                    {},
+                    100).hasValue(),
+                "first transition replacement failed");
+            SessionReplacement second{
+                .generation = 2,
+                .materials = {
+                    {"glass", material("glass")},
+                },
+                .targets = {
+                    transitioningTarget(
+                        "bar",
+                        "enter-1",
+                        40),
+                },
+            };
+            const auto result = fixture.manager.replace(
+                handle.sessionId,
+                handle.token,
+                std::move(second),
+                {},
+                160);
+            require(
+                result.hasValue() &&
+                    result.value().transitionAnchorMs == 160 &&
+                    result.value().targets.front()
+                            .transition->elapsedMs ==
+                        100,
+                "same transition id restarted compositor motion");
+        }},
+        Case{"new transition id starts a new event", [] {
+            Fixture fixture;
+            const auto handle =
+                fixture.manager.open(
+                    "shell",
+                    SessionMode::Client,
+                    0).value();
+            SessionReplacement first{
+                .generation = 1,
+                .materials = {
+                    {"glass", material("glass")},
+                },
+                .targets = {
+                    transitioningTarget(
+                        "bar",
+                        "enter-1",
+                        40),
+                },
+            };
+            require(
+                fixture.manager.replace(
+                    handle.sessionId,
+                    handle.token,
+                    std::move(first),
+                    {},
+                    100).hasValue(),
+                "first transition replacement failed");
+            SessionReplacement second{
+                .generation = 2,
+                .materials = {
+                    {"glass", material("glass")},
+                },
+                .targets = {
+                    transitioningTarget(
+                        "bar",
+                        "enter-2",
+                        0),
+                },
+            };
+            const auto result = fixture.manager.replace(
+                handle.sessionId,
+                handle.token,
+                std::move(second),
+                {},
+                160);
+            require(
+                result.hasValue() &&
+                    result.value().targets.front()
+                            .transition->elapsedMs ==
+                        0,
+                "new transition id inherited old progress");
+        }},
+        Case{"compound part transition preserves progress by id", [] {
+            Fixture fixture;
+            const auto handle =
+                fixture.manager.open(
+                    "shell",
+                    SessionMode::Client,
+                    0).value();
+            SessionReplacement first{
+                .generation = 1,
+                .materials = {
+                    {"glass", material("glass")},
+                },
+                .targets = {
+                    transitioningCompoundTarget(
+                        "part-1",
+                        20),
+                },
+            };
+            require(
+                fixture.manager.replace(
+                    handle.sessionId,
+                    handle.token,
+                    std::move(first),
+                    {},
+                    100).hasValue(),
+                "first compound transition failed");
+            SessionReplacement second{
+                .generation = 2,
+                .materials = {
+                    {"glass", material("glass")},
+                },
+                .targets = {
+                    transitioningCompoundTarget(
+                        "part-1",
+                        20),
+                },
+            };
+            const auto result = fixture.manager.replace(
+                handle.sessionId,
+                handle.token,
+                std::move(second),
+                {},
+                150);
+            const auto* compound = result
+                ? std::get_if<CompoundShape>(
+                      &result.value().targets.front().shape)
+                : nullptr;
+            require(
+                compound &&
+                    compound->parts.front()
+                            .transition->motion.elapsedMs ==
+                        70,
+                "compound part transition restarted");
+        }},
+        Case{"backward replacement time preserves live state", [] {
+            Fixture fixture;
+            const auto handle =
+                fixture.manager.open(
+                    "shell",
+                    SessionMode::Client,
+                    0).value();
+            SessionReplacement first{
+                .generation = 1,
+                .materials = {
+                    {"glass", material("glass")},
+                },
+                .targets = {
+                    transitioningTarget(
+                        "bar",
+                        "enter-1"),
+                },
+            };
+            require(
+                fixture.manager.replace(
+                    handle.sessionId,
+                    handle.token,
+                    std::move(first),
+                    {},
+                    100).hasValue(),
+                "first transition replacement failed");
+            SessionReplacement stale{
+                .generation = 2,
+                .materials = {
+                    {"glass", material("glass")},
+                },
+                .targets = {
+                    transitioningTarget(
+                        "bar",
+                        "enter-1"),
+                },
+            };
+            const auto result = fixture.manager.replace(
+                handle.sessionId,
+                handle.token,
+                std::move(stale),
+                {},
+                99);
+            const auto live =
+                fixture.manager.snapshot(handle.sessionId);
+            require(
+                !result &&
+                    result.error().code ==
+                        ErrorCode::StaleGeneration &&
+                    live &&
+                    live->generation == 1 &&
+                    live->transitionAnchorMs == 100,
+                "backward replacement changed live transition state");
         }},
     });
 }

@@ -1,10 +1,12 @@
 #include "v2/model/Session.hpp"
 
 #include "v2/core/Limits.hpp"
+#include "v2/render/TransitionMotion.hpp"
 
 #include <algorithm>
 #include <cctype>
 #include <limits>
+#include <map>
 #include <ranges>
 #include <string_view>
 
@@ -33,6 +35,74 @@ bool validOpaqueValue(std::string_view value) {
         std::ranges::none_of(value, [](const unsigned char character) {
             return std::iscntrl(character);
         });
+}
+
+void collectTransitionElapsed(
+    const Target& target,
+    std::uint64_t anchorMs,
+    std::uint64_t nowMs,
+    std::map<std::string, std::uint64_t, std::less<>>& elapsed) {
+    const auto collect = [&](const Transition& transition) {
+        const auto current = transitionElapsedAt(
+            transition,
+            anchorMs,
+            nowMs);
+        auto [entry, inserted] = elapsed.emplace(
+            transition.id,
+            current);
+        if (!inserted)
+            entry->second = std::max(
+                entry->second,
+                current);
+    };
+    if (target.transition)
+        collect(*target.transition);
+    const auto* compound =
+        std::get_if<CompoundShape>(&target.shape);
+    if (!compound)
+        return;
+    for (const auto& part : compound->parts)
+        if (part.transition)
+            collect(part.transition->motion);
+}
+
+void carryTransitionElapsed(
+    const std::map<std::string, std::uint64_t, std::less<>>& elapsed,
+    Transition& transition) {
+    const auto previous = elapsed.find(transition.id);
+    if (previous == elapsed.end())
+        return;
+    transition.elapsedMs = std::min(
+        transition.durationMs,
+        std::max(
+            transition.elapsedMs,
+            previous->second));
+}
+
+void preserveTargetTransitions(
+    const Target& previous,
+    std::uint64_t previousAnchorMs,
+    Target& replacement,
+    std::uint64_t nowMs) {
+    std::map<std::string, std::uint64_t, std::less<>> elapsed;
+    collectTransitionElapsed(
+        previous,
+        previousAnchorMs,
+        nowMs,
+        elapsed);
+    if (replacement.transition)
+        carryTransitionElapsed(
+            elapsed,
+            *replacement.transition);
+    auto* compound =
+        std::get_if<CompoundShape>(&replacement.shape);
+    if (!compound)
+        return;
+    for (auto& part : compound->parts)
+        if (part.transition)
+            carryTransitionElapsed(
+                elapsed,
+                part.transition->motion);
 }
 
 } // namespace
@@ -73,6 +143,7 @@ Result<SessionHandle> SessionManager::open(std::string clientId, SessionMode mod
         .generation = 0,
         .leaseMs = lease,
         .expiresAtMs = saturatingDeadline(nowMs, lease),
+        .transitionAnchorMs = nowMs,
         .materials = {},
         .targets = {},
     };
@@ -128,11 +199,30 @@ Result<SessionSnapshot> SessionManager::replace(
             return failure<SessionSnapshot>(ErrorCode::InvalidMaterial, path + ".material", "config material not found");
         }
     }
+    if (nowMs < record->second.transitionAnchorMs)
+        return failure<SessionSnapshot>(
+            ErrorCode::StaleGeneration,
+            "now_ms",
+            "replacement time predates the current transition anchor");
+    for (auto& replacementTarget : replacement.targets) {
+        const auto previous = std::ranges::find(
+            record->second.targets,
+            replacementTarget.id,
+            &Target::id);
+        if (previous == record->second.targets.end())
+            continue;
+        preserveTargetTransitions(
+            *previous,
+            record->second.transitionAnchorMs,
+            replacementTarget,
+            nowMs);
+    }
 
     record->second.generation  = replacement.generation;
     record->second.materials   = std::move(replacement.materials);
     record->second.targets     = std::move(replacement.targets);
     record->second.expiresAtMs = saturatingDeadline(nowMs, record->second.leaseMs);
+    record->second.transitionAnchorMs = nowMs;
     return Result<SessionSnapshot>::success(snapshotFor(record->second));
 }
 
@@ -265,6 +355,7 @@ SessionSnapshot SessionManager::snapshotFor(const Record& record) {
         .mode = record.mode,
         .generation = record.generation,
         .expiresAtMs = record.expiresAtMs,
+        .transitionAnchorMs = record.transitionAnchorMs,
         .materials = record.materials,
         .targets = record.targets,
     };
