@@ -1,0 +1,59 @@
+#pragma once
+
+#include "v2/core/Result.hpp"
+#include "v2/render/CaptureScene.hpp"
+#include "v2/render/GlassRenderScene.hpp"
+#include "v2/render/HyprlandCaptureResourceManager.hpp"
+#include "v2/render/RenderStageScheduler.hpp"
+
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <vector>
+
+namespace hfg::v2 {
+
+struct GlassSceneReconcileResult {
+  GlassRenderScene scene;
+  std::vector<CaptureAllocationFailure> allocationFailures;
+  std::vector<std::uint64_t> retiredTokens;
+};
+
+struct GlassPassEnqueueResult {
+  std::size_t capturePasses = 0;
+  std::size_t drawPasses = 0;
+  std::vector<PixelRect> renderDamage;
+  std::vector<Rect> continuationDamage;
+  bool directScanoutBlockRequired = false;
+};
+
+struct HyprlandGlassPassExecutionState;
+
+class HyprlandGlassPassCoordinator {
+public:
+  HyprlandGlassPassCoordinator();
+  ~HyprlandGlassPassCoordinator();
+
+  HyprlandGlassPassCoordinator(const HyprlandGlassPassCoordinator &) = delete;
+  HyprlandGlassPassCoordinator &
+  operator=(const HyprlandGlassPassCoordinator &) = delete;
+  HyprlandGlassPassCoordinator(HyprlandGlassPassCoordinator &&) = delete;
+  HyprlandGlassPassCoordinator &
+  operator=(HyprlandGlassPassCoordinator &&) = delete;
+
+  [[nodiscard]] Result<GlassSceneReconcileResult>
+  reconcile(const CaptureScene &captures, std::uint64_t maxTotalBytes);
+
+  [[nodiscard]] Result<GlassPassEnqueueResult>
+  enqueue(const RenderHookEvent &event);
+
+  [[nodiscard]] const GlassRenderScene &scene() const noexcept;
+
+  void clear() noexcept;
+
+private:
+  std::shared_ptr<HyprlandGlassPassExecutionState> m_execution;
+  GlassRenderScene m_scene;
+};
+
+} // namespace hfg::v2

@@ -37,6 +37,7 @@ add_library(hyprfluidglass SHARED
     src/v2/render/HyprlandCaptureResource.cpp
     src/v2/render/HyprlandCaptureResourceManager.cpp
     src/v2/render/HyprlandGlassDrawExecutor.cpp
+    src/v2/render/HyprlandGlassPassCoordinator.cpp
     src/v2/render/HyprlandGlassShader.cpp
     src/v2/render/HyprlandOutputCatalog.cpp
     src/v2/render/HyprlandRenderStageAdapter.cpp
