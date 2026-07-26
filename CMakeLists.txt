@@ -36,6 +36,7 @@ add_library(hyprfluidglass SHARED
     src/v2/render/HyprlandCaptureFormat.cpp
     src/v2/render/HyprlandCaptureResource.cpp
     src/v2/render/HyprlandCaptureResourceManager.cpp
+    src/v2/render/HyprlandDirectScanoutInhibitor.cpp
     src/v2/render/HyprlandGlassDrawExecutor.cpp
     src/v2/render/HyprlandGlassPassCoordinator.cpp
     src/v2/render/HyprlandGlassShader.cpp
@@ -85,6 +86,7 @@ add_library(hyprfluidglass-v2-core STATIC
     src/v2/render/CapturePlan.cpp
     src/v2/render/CaptureResourcePlan.cpp
     src/v2/render/CaptureScene.cpp
+    src/v2/render/DirectScanoutLeasePlan.cpp
     src/v2/render/Geometry.cpp
     src/v2/render/GlassDrawPlan.cpp
     src/v2/render/GlassFramePlan.cpp
@@ -154,6 +156,12 @@ if(BUILD_TESTING)
     target_link_libraries(hyprfluidglass-legacy-compatibility-tests PRIVATE hyprfluidglass-v2-core)
     target_compile_options(hyprfluidglass-legacy-compatibility-tests PRIVATE -Wall -Wextra -Wpedantic)
     add_test(NAME hyprfluidglass-legacy-compatibility COMMAND hyprfluidglass-legacy-compatibility-tests)
+
+    add_executable(hyprfluidglass-direct-scanout-lease-plan-tests tests/direct_scanout_lease_plan_tests.cpp)
+    target_include_directories(hyprfluidglass-direct-scanout-lease-plan-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+    target_link_libraries(hyprfluidglass-direct-scanout-lease-plan-tests PRIVATE hyprfluidglass-v2-core)
+    target_compile_options(hyprfluidglass-direct-scanout-lease-plan-tests PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME hyprfluidglass-direct-scanout-lease-plan COMMAND hyprfluidglass-direct-scanout-lease-plan-tests)
 
     add_executable(hyprfluidglass-opaque-id-tests tests/opaque_id_tests.cpp)
     target_include_directories(hyprfluidglass-opaque-id-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests")
