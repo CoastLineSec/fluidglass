@@ -4,8 +4,9 @@
 
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/desktop/view/LayerSurface.hpp>
-#include <hyprland/src/helpers/Monitor.hpp>
+#include <hyprland/src/output/Monitor.hpp>
 #include <hyprland/src/protocols/LayerShell.hpp>
+#include <hyprland/src/state/MonitorState.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -80,7 +81,7 @@ HyprlandLayerCatalog::allSnapshots() {
         return entry.first.expired();
     });
     std::vector<LayerSurfaceSnapshot> result;
-    for (const auto& monitor : g_pCompositor->m_monitors) {
+    for (const auto& monitor : State::monitorState()->monitors()) {
         if (!monitor)
             continue;
         for (const auto& level : monitor->m_layerSurfaceLayers) {
@@ -98,8 +99,10 @@ HyprlandLayerCatalog::allSnapshots() {
                 if (!token)
                     return Result<std::vector<LayerSurfaceSnapshot>>::failure(
                         token.error());
-                const auto position = surface->m_realPosition->value();
-                const auto size = surface->m_realSize->value();
+                const auto position = surface->position(
+                    Desktop::View::IGeometric::GEOMETRIC_CURRENT);
+                const auto size = surface->size(
+                    Desktop::View::IGeometric::GEOMETRIC_CURRENT);
                 result.push_back({
                     .namespaceName = surface->m_namespace,
                     .objectToken = token.value(),
@@ -112,12 +115,12 @@ HyprlandLayerCatalog::allSnapshots() {
                     },
                     .level = *mappedLevel,
                     .opacity = std::clamp(
-                        static_cast<double>(surface->m_alpha->value()),
+                        static_cast<double>(surface->alpha().value()),
                         0.0,
                         1.0),
                     .mapped = surface->m_mapped,
-                    .fadingOut = surface->m_fadingOut,
-                    .readyToDelete = surface->m_readyToDelete,
+                    .fadingOut = false,
+                    .readyToDelete = false,
                 });
                 if (result.size() > Limits::MAX_COMPOSITOR_OBJECTS)
                     return unavailable(

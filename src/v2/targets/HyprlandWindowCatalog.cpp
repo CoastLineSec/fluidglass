@@ -3,6 +3,7 @@
 #include "v2/core/Limits.hpp"
 
 #include <hyprland/src/Compositor.hpp>
+#include <hyprland/src/desktop/state/WindowState.hpp>
 #include <hyprland/src/desktop/view/Window.hpp>
 
 #include <algorithm>
@@ -83,7 +84,7 @@ HyprlandWindowCatalog::allSnapshots() {
         return entry.first.expired();
     });
     std::vector<WindowSnapshot> result;
-    for (const auto& window : g_pCompositor->m_windows) {
+    for (const auto& window : Desktop::windowState()->windows()) {
         if (!window)
             continue;
         const auto candidateAddress = addressFor(window);
@@ -93,8 +94,10 @@ HyprlandWindowCatalog::allSnapshots() {
         if (!token)
             return Result<std::vector<WindowSnapshot>>::failure(
                 token.error());
-        const auto position = window->m_realPosition->value();
-        const auto size = window->m_realSize->value();
+        const auto position = window->position(
+            Desktop::View::IGeometric::GEOMETRIC_CURRENT);
+        const auto size = window->size(
+            Desktop::View::IGeometric::GEOMETRIC_CURRENT);
         result.push_back({
             .address = candidateAddress,
             .objectToken = token.value(),
@@ -114,8 +117,8 @@ HyprlandWindowCatalog::allSnapshots() {
                 static_cast<double>(window->roundingPower()),
             .opacity = static_cast<double>(window->effectiveAlpha()),
             .mapped = window->m_isMapped,
-            .fadingOut = window->m_fadingOut,
-            .readyToDelete = window->m_readyToDelete,
+            .fadingOut = false,
+            .readyToDelete = false,
         });
         if (result.size() > Limits::MAX_COMPOSITOR_OBJECTS)
             return unavailable(

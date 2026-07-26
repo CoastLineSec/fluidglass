@@ -1,7 +1,7 @@
 #include "v2/render/HyprlandDirectScanoutInhibitor.hpp"
 
-#include <hyprland/src/helpers/Monitor.hpp>
-#include <hyprland/src/managers/PointerManager.hpp>
+#include <hyprland/src/output/Monitor.hpp>
+#include <hyprland/src/pointer/PointerManager.hpp>
 
 #include <algorithm>
 #include <exception>
@@ -28,7 +28,8 @@ HyprlandDirectScanoutInhibitor::~HyprlandDirectScanoutInhibitor() { clear(); }
 
 Result<void> HyprlandDirectScanoutInhibitor::reconcile(
     std::span<const DirectScanoutLease> desired) {
-  if (!g_pPointerManager)
+  auto &pointerManager = Pointer::mgr();
+  if (!pointerManager)
     return failure(ErrorCode::UnsupportedOperation, "pointer-manager",
                    "Hyprland pointer manager is unavailable");
 
@@ -53,7 +54,7 @@ Result<void> HyprlandDirectScanoutInhibitor::reconcile(
         return failure(ErrorCode::StaleGeneration, "output",
                        "direct-scanout lease output identity changed");
       }
-      g_pPointerManager->lockSoftwareForMonitor(monitor.value());
+      pointerManager->lockSoftwareForMonitor(monitor.value());
       provisional.push_back({
           .lease = lease,
           .monitor = monitor.value(),
@@ -106,10 +107,11 @@ void HyprlandDirectScanoutInhibitor::pruneExpired() noexcept {
 
 void HyprlandDirectScanoutInhibitor::release(Entry &entry) noexcept {
   const auto monitor = entry.monitor.lock();
-  if (!monitor || !g_pPointerManager)
+  auto &pointerManager = Pointer::mgr();
+  if (!monitor || !pointerManager)
     return;
   try {
-    g_pPointerManager->unlockSoftwareForMonitor(monitor);
+    pointerManager->unlockSoftwareForMonitor(monitor);
   } catch (...) {
   }
 }

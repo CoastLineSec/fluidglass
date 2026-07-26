@@ -54,9 +54,7 @@ Result<void> HyprlandWindowAttachmentManager::reconcile(
             rollback(provisional);
             return Result<void>::failure(window.error());
         }
-        if (!window.value()->m_isMapped ||
-            window.value()->m_fadingOut ||
-            window.value()->m_readyToDelete) {
+        if (!Desktop::View::validMapped(window.value())) {
             rollback(provisional);
             return failure(
                 ErrorCode::UnresolvedTarget,

@@ -31,7 +31,7 @@
 
 #include <hyprland/src/SharedDefs.hpp>
 #include <hyprland/src/Compositor.hpp>
-#include <hyprland/src/helpers/Monitor.hpp>
+#include <hyprland/src/output/Monitor.hpp>
 #include <hyprland/src/plugins/PluginAPI.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/render/OpenGL.hpp>
@@ -39,12 +39,14 @@
 #include <hyprland/src/managers/input/InputManager.hpp>
 #include <hyprland/src/desktop/view/Window.hpp>
 #include <hyprland/src/desktop/view/LayerSurface.hpp>
+#include <hyprland/src/desktop/state/WindowState.hpp>
 #include <hyprland/src/desktop/rule/windowRule/WindowRuleApplicator.hpp>
 #include <hyprland/src/managers/EventManager.hpp>
 #include <hyprland/src/managers/eventLoop/EventLoopManager.hpp>
 #include <hyprland/src/managers/eventLoop/EventLoopTimer.hpp>
 #include <hyprland/src/event/EventBus.hpp>
 #include <hyprland/src/protocols/XDGShell.hpp>
+#include <hyprland/src/state/MonitorState.hpp>
 
 #include <nlohmann/json.hpp>
 #include <lua.hpp>
@@ -1550,6 +1552,21 @@ bool drawElement(const GlassElement& el, const SP<Render::ITexture>& capture) {
     es.w = ew; es.h = eh; es.radius = el.radius * as;
     const ResolvedParams rp = resolveParams(es, scale);
 
+    // Custom passes must leave Hyprland's cached current program consistent
+    // with GL_CURRENT_PROGRAM. Rebind a compositor-owned shader on every exit.
+    Render::CScopeGuard restoreTrackedShader([] {
+        try {
+            if (!Render::GL::g_pHyprOpenGL)
+                return;
+            const auto fallback =
+                Render::GL::g_pHyprOpenGL->getShaderVariant(
+                    Render::SH_FRAG_PASSTHRURGBA);
+            if (fallback)
+                Render::GL::g_pHyprOpenGL->useShader(fallback);
+        } catch (...) {
+        }
+    });
+
     // Frost the backdrop subrect first (separable two-pass at half res); the
     // glass shader then reads it with one tap per fragment. The apron covers
     // everything the shader can reach: blur spread, refraction and CA offsets.
@@ -1878,7 +1895,7 @@ bool resolveWindowBind(GlassElement& el, const PHLMONITOR& renderMonitor, bool& 
     PHLWINDOW win;
     if (field == 3) {
         // Address match: exact pointer identity, no regex machinery.
-        for (const auto& w : g_pCompositor->m_windows) {
+        for (const auto& w : Desktop::windowState()->windows()) {
             if (!w || !w->m_isMapped)
                 continue;
             if (std::format("{:x}", reinterpret_cast<uintptr_t>(w.get())) == sel) {
@@ -1902,7 +1919,7 @@ bool resolveWindowBind(GlassElement& el, const PHLMONITOR& renderMonitor, bool& 
 
         try {
             const std::regex& re = *rePtr;
-            for (const auto& w : g_pCompositor->m_windows) {
+            for (const auto& w : Desktop::windowState()->windows()) {
                 if (!w || !w->m_isMapped)
                     continue;
                 const bool hit = (field == 1) ? std::regex_search(w->m_title, re)
@@ -1919,8 +1936,10 @@ bool resolveWindowBind(GlassElement& el, const PHLMONITOR& renderMonitor, bool& 
         }
     }
     if (!win || !win->m_isMapped) return false;
-    const Vector2D wpos  = win->m_realPosition->value();   // global logical top-left
-    const Vector2D wsize = win->m_realSize->value();
+    const Vector2D wpos = win->position(
+        Desktop::View::IGeometric::GEOMETRIC_CURRENT);
+    const Vector2D wsize = win->size(
+        Desktop::View::IGeometric::GEOMETRIC_CURRENT);
     // Auto-geometry: a window-bound element sent WITHOUT a size takes the live
     // window's size and actual Hyprland corner rounding each frame — foreign
     // app windows (the app-glass registry) never need shell-side geometry.
@@ -1966,7 +1985,8 @@ bool resolveLayerBind(GlassElement& el, const PHLMONITOR& monitor, double& alpha
             // object on this Hyprland), so the mapped check alone covers teardown.
             if (!ls || !ls->m_mapped) continue;
             if (ls->m_namespace != el.bindSelector) continue;
-            const Vector2D lp = ls->m_realPosition->value();   // global logical top-left
+            const Vector2D lp = ls->position(
+                Desktop::View::IGeometric::GEOMETRIC_CURRENT);
             const double   lx = lp.x - monitor->m_position.x;
             const double   ly = lp.y - monitor->m_position.y;
             const double   d  = (lx - expX) * (lx - expX) + (ly - expY) * (ly - expY);
@@ -1975,7 +1995,7 @@ bool resolveLayerBind(GlassElement& el, const PHLMONITOR& monitor, double& alpha
                 bestD = d;
                 bestX = lx;
                 bestY = ly;
-                bestA = clampd(ls->m_alpha->value(), 0.0, 1.0);
+                bestA = clampd(ls->alpha().value(), 0.0, 1.0);
                 bestL = static_cast<int>(ls->m_layer);
                 bestW = ls->m_geometry.w;   // P4: observed surface size (logical)
                 bestH = ls->m_geometry.h;
@@ -2003,7 +2023,7 @@ static std::unordered_set<std::string> g_preWindowDrawn;
 void pruneRemovedOutputState() {
     std::set<std::string> activeOutputs;
     if (g_pCompositor) {
-        for (const auto& monitor : g_pCompositor->m_monitors)
+        for (const auto& monitor : State::monitorState()->monitors())
             if (monitor)
                 activeOutputs.insert(monitor->m_name);
     }
@@ -2591,7 +2611,7 @@ void renderFluidGlass(eRenderStage stage) {
 
 void damageAllMonitors() {
     if (!g_pHyprRenderer) return;
-    for (const auto& m : g_pCompositor->m_monitors)
+    for (const auto& m : State::monitorState()->monitors())
         if (m) g_pHyprRenderer->damageMonitor(m);
 }
 
@@ -2889,7 +2909,7 @@ std::string applyPayload(std::string payload) {
         if (animMs >= 0.0) g_animMs = animMs;
 
         auto monitorPos = [](const std::string& name) -> std::optional<Vector2D> {
-            for (const auto& m : g_pCompositor->m_monitors)
+            for (const auto& m : State::monitorState()->monitors())
                 if (m && m->m_name == name) return m->m_position;
             return std::nullopt;
         };

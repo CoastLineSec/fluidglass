@@ -4,8 +4,9 @@
 #include "v2/runtime/LiveScenePlan.hpp"
 
 #include <hyprland/src/Compositor.hpp>
-#include <hyprland/src/helpers/Monitor.hpp>
+#include <hyprland/src/output/Monitor.hpp>
 #include <hyprland/src/render/Renderer.hpp>
+#include <hyprland/src/state/MonitorState.hpp>
 
 #include <algorithm>
 #include <set>
@@ -212,7 +213,7 @@ Result<void> HyprlandGlassSceneController::refreshResolvedScene(
     m_presentations = std::move(presentations.value());
     reconcileReadiness(previousMembership);
     if (membershipChanged && g_pHyprRenderer && g_pCompositor)
-        for (const auto& monitor : g_pCompositor->m_monitors)
+        for (const auto& monitor : State::monitorState()->monitors())
             if (monitor)
                 g_pHyprRenderer->damageMonitor(monitor);
     return Result<void>::success();

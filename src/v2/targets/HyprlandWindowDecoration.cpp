@@ -60,9 +60,7 @@ void HyprlandWindowDecoration::draw(
     if (!m_drawCallback ||
         !monitor ||
         !attachedWindow ||
-        !attachedWindow->m_isMapped ||
-        attachedWindow->m_fadingOut ||
-        attachedWindow->m_readyToDelete)
+        !Desktop::View::validMapped(attachedWindow))
         return;
 
     try {

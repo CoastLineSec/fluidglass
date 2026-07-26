@@ -3,8 +3,9 @@
 #include "v2/core/Limits.hpp"
 
 #include <hyprland/src/Compositor.hpp>
-#include <hyprland/src/helpers/Monitor.hpp>
+#include <hyprland/src/output/Monitor.hpp>
 #include <hyprland/src/helpers/cm/ColorManagement.hpp>
+#include <hyprland/src/state/MonitorState.hpp>
 
 #include <drm_fourcc.h>
 #include <wayland-server-protocol.h>
@@ -226,7 +227,7 @@ Result<OutputCatalogRefresh> HyprlandOutputCatalog::refresh() {
     pruneExpiredObjects();
     std::vector<OutputSnapshot> snapshots;
     std::set<std::string, std::less<>> seenNames;
-    for (const auto& monitor : g_pCompositor->m_monitors) {
+    for (const auto& monitor : State::monitorState()->monitors()) {
         if (!monitor || !monitor->m_enabled)
             continue;
         auto snapshot = snapshotFor(monitor);
