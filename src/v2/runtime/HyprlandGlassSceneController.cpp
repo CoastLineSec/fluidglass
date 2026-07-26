@@ -204,13 +204,13 @@ Result<void> HyprlandGlassSceneController::refreshResolvedScene(
         return attached;
     }
 
+    const auto previousMembership = membershipOf(m_presentations);
     const auto membershipChanged =
-        membershipOf(m_presentations) !=
-        membershipOf(presentations.value());
+        previousMembership != membershipOf(presentations.value());
     m_currentOutputs = std::move(outputs.value().current);
     m_targets = std::move(targets.value());
     m_presentations = std::move(presentations.value());
-    reconcileReadiness();
+    reconcileReadiness(previousMembership);
     if (membershipChanged && g_pHyprRenderer && g_pCompositor)
         for (const auto& monitor : g_pCompositor->m_monitors)
             if (monitor)
@@ -339,7 +339,9 @@ void HyprlandGlassSceneController::recordDecorationFailure(
     }
 }
 
-void HyprlandGlassSceneController::reconcileReadiness() {
+void HyprlandGlassSceneController::reconcileReadiness(
+    const std::set<std::pair<PresentationKey, std::uint64_t>>&
+        previousMembership) {
     auto& readiness = m_runtime.readinessTracker();
     std::set<PresentationKey> currentKeys;
     for (const auto& planned : m_presentations.presentations) {
@@ -350,10 +352,15 @@ void HyprlandGlassSceneController::reconcileReadiness() {
         if (targetRecord->state != ReadinessState::Accepted)
             static_cast<void>(readiness.accept(key.identity));
         currentKeys.insert(key);
-        if (!readiness.presentation(key))
+        const auto unchanged = previousMembership.contains(
+            {key, planned.presentation.attachmentToken});
+        if (!unchanged && readiness.presentation(key))
+            readiness.erasePresentation(key);
+        if (!readiness.presentation(key)) {
             static_cast<void>(readiness.resolvePresentation(key));
-        static_cast<void>(
-            readiness.transition(key, ReadinessState::Attached));
+            static_cast<void>(
+                readiness.transition(key, ReadinessState::Attached));
+        }
     }
 
     for (const auto& session : m_runtime.sessionManager().snapshots())

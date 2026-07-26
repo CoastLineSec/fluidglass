@@ -17,7 +17,9 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
+#include <utility>
 
 namespace hfg::v2 {
 
@@ -64,7 +66,9 @@ class HyprlandGlassSceneController final
     drawWindowDecoration(const WindowDecorationDrawContext& context);
     void recordDecorationFailure(const TargetIdentity& identity,
                                  const Error& error) noexcept;
-    void reconcileReadiness();
+    void reconcileReadiness(
+        const std::set<std::pair<PresentationKey, std::uint64_t>>&
+            previousMembership);
     void recordFailure(Error error) noexcept;
     void publishStatus() noexcept;
     void clearLiveState() noexcept;
