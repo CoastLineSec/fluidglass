@@ -495,7 +495,10 @@ A target may carry one transition:
 
 `id` identifies one motion event. Replacing a session with the same transition
 ID updates the target without restarting that event. A new ID starts a new
-event even when `phase` is unchanged.
+event even when `phase` is unchanged. On a successful replacement, the plugin
+anchors the supplied `elapsed_ms` to compositor monotonic time and advances it
+until `duration_ms` is reached. Repeating the same ID cannot move that live
+elapsed time backward.
 
 Transition fields:
 

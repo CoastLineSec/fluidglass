@@ -264,6 +264,28 @@ are scaled once, edge bands are capped against the full target's short axis,
 and only finite validated values reach the shader. Disabling color tint selects
 the neutral veil color rather than leaving a stale stained color active.
 
+## Transitions
+
+A leased target snapshot anchors its declared `elapsed_ms` to the monotonic
+time at which `session.replace` succeeds. The compositor advances from that
+anchor without requiring the client to submit geometry every frame.
+
+Replacing the same target with the same transition ID preserves elapsed
+compositor time. A new transition ID starts a new motion event. Failed or
+out-of-order replacements do not change the live anchor.
+
+Target motion is resolved before output intersection and geometry mapping.
+Translation and opacity therefore affect capture, shape, and damage through the
+same presentation geometry. Compound-part motion is resolved before
+design-pixel geometry is scaled for the shader. A moving part may translate,
+fade, and collapse up to its declared `protrusion`; its resolved draw data no
+longer contains an executable transition object.
+
+Cubic Bezier easing is evaluated as a function of x, including segmented curves.
+Bounded overshoot may affect geometry, while opacity remains clamped from zero
+through one. A backward monotonic timestamp or non-finite result fails the
+affected presentation closed.
+
 ## Damage
 
 Damage includes both the previous and current presentation bounds plus the
