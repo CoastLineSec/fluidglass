@@ -226,6 +226,44 @@ bottom-left origin. The bounded copy converts that y axis exactly once and
 copies into an equally sized texture with nearest sampling; it does not scale
 or color-convert the backdrop during capture.
 
+## Draw planning
+
+Draw planning is a validated boundary between scene resolution and compositor
+GPU execution. A draw is rejected unless all of the following still agree:
+
+- target, attachment, and presentation identity;
+- output connector, generation, render stage, format, and color state;
+- exact window identity for `pre-window`;
+- canonical output mapping and material sampling footprint;
+- canonical per-presentation capture requirement;
+- a live capture resource that covers that requirement without extending
+  outside the output buffer.
+
+The draw plan carries target-local shape dimensions in output-buffer pixels,
+while its destination remains in output-local logical coordinates for
+Hyprland's projection. When a target is clipped by an output boundary, the plan
+keeps the full target size and a target-local clip offset. Clipping therefore
+does not recenter, stretch, or otherwise change the shape.
+
+Backdrop coordinates are derived from the mapped semantic corners in
+top-left, top-right, bottom-right, bottom-left order. They are normalized
+against the selected bounded capture and perform the OpenGL y-axis inversion
+exactly once:
+
+```text
+u = (buffer_x - capture_x) / capture_width
+v = (capture_y + capture_height - buffer_y) / capture_height
+```
+
+This remains true when one capture resource covers several presentations.
+Rotation and reflection are already represented by the semantic corner
+mapping; the draw executor does not apply another output transform.
+
+Material uniforms are resolved before the render pass. Design-pixel lengths
+are scaled once, edge bands are capped against the full target's short axis,
+and only finite validated values reach the shader. Disabling color tint selects
+the neutral veil color rather than leaving a stale stained color active.
+
 ## Damage
 
 Damage includes both the previous and current presentation bounds plus the
