@@ -43,6 +43,7 @@ add_library(hyprfluidglass SHARED
     src/v2/render/HyprlandOutputCatalog.cpp
     src/v2/render/HyprlandRenderStageAdapter.cpp
     src/v2/render/HyprlandStateGuard.cpp
+    src/v2/runtime/HyprlandGlassSceneController.cpp
     src/v2/targets/HyprlandLayerCatalog.cpp
     src/v2/targets/HyprlandWindowAttachmentManager.cpp
     src/v2/targets/HyprlandWindowDecoration.cpp
@@ -101,6 +102,7 @@ add_library(hyprfluidglass-v2-core STATIC
     src/v2/render/ShapeMotion.cpp
     src/v2/render/TransitionMotion.cpp
     src/v2/runtime/Runtime.cpp
+    src/v2/runtime/LiveScenePlan.cpp
     src/v2/targets/Attachment.cpp
     src/v2/targets/LayerAdapter.cpp
     src/v2/targets/LayerRuleResolver.cpp
@@ -422,4 +424,10 @@ if(BUILD_TESTING)
     target_link_libraries(hyprfluidglass-runtime-tests PRIVATE hyprfluidglass-v2-core)
     target_compile_options(hyprfluidglass-runtime-tests PRIVATE -Wall -Wextra -Wpedantic)
     add_test(NAME hyprfluidglass-runtime COMMAND hyprfluidglass-runtime-tests)
+
+    add_executable(hyprfluidglass-live-scene-plan-tests tests/live_scene_plan_tests.cpp)
+    target_include_directories(hyprfluidglass-live-scene-plan-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+    target_link_libraries(hyprfluidglass-live-scene-plan-tests PRIVATE hyprfluidglass-v2-core)
+    target_compile_options(hyprfluidglass-live-scene-plan-tests PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME hyprfluidglass-live-scene-plan COMMAND hyprfluidglass-live-scene-plan-tests)
 endif()

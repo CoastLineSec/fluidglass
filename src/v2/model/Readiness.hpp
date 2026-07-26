@@ -93,6 +93,7 @@ class ReadinessTracker {
         const TargetIdentity& identity) const;
 
     void erase(const TargetIdentity& identity);
+    void erasePresentation(const PresentationKey& key);
 
   private:
     [[nodiscard]] ReadinessRecord nextRecord(ReadinessState state, std::string detail);

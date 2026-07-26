@@ -103,6 +103,10 @@ void ReadinessTracker::erase(const TargetIdentity& identity) {
     });
 }
 
+void ReadinessTracker::erasePresentation(const PresentationKey& key) {
+    m_presentations.erase(key);
+}
+
 ReadinessRecord ReadinessTracker::nextRecord(ReadinessState state, std::string detail) {
     return {
         .state = state,
