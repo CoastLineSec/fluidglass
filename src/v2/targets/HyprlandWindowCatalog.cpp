@@ -46,8 +46,17 @@ std::string addressFor(const PHLWINDOW& window) {
 
 } // namespace
 
-Result<std::uint64_t> HyprlandWindowCatalog::tokenFor(
+Result<std::uint64_t> HyprlandWindowCatalog::objectTokenFor(
     PHLWINDOWREF window) {
+    std::erase_if(m_tokens, [](const auto& entry) {
+        return entry.first.expired();
+    });
+    if (window.expired())
+        return Result<std::uint64_t>::failure({
+            ErrorCode::UnresolvedTarget,
+            "window",
+            "window object is no longer live",
+        });
     const auto existing = m_tokens.find(window);
     if (existing != m_tokens.end())
         return Result<std::uint64_t>::success(existing->second);
@@ -80,7 +89,7 @@ HyprlandWindowCatalog::allSnapshots() {
         const auto candidateAddress = addressFor(window);
 
         PHLWINDOWREF reference = window;
-        auto token = tokenFor(reference);
+        auto token = objectTokenFor(reference);
         if (!token)
             return Result<std::vector<WindowSnapshot>>::failure(
                 token.error());

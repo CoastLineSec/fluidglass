@@ -20,12 +20,12 @@ class HyprlandWindowCatalog {
         std::string_view address);
     [[nodiscard]] Result<PHLWINDOW> windowFor(
         std::uint64_t objectToken);
+    [[nodiscard]] Result<std::uint64_t> objectTokenFor(
+        PHLWINDOWREF window);
 
     void clear() noexcept;
 
   private:
-    [[nodiscard]] Result<std::uint64_t> tokenFor(PHLWINDOWREF window);
-
     std::map<PHLWINDOWREF, std::uint64_t> m_tokens;
     std::uint64_t                         m_lastToken = 0;
 };
