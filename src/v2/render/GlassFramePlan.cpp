@@ -133,4 +133,48 @@ Result<GlassFramePlan> planGlassFrame(const GlassRenderScene &scene,
   return Result<GlassFramePlan>::success(std::move(result));
 }
 
+Result<std::vector<std::size_t>> planWindowDecorationDraws(
+    const GlassRenderScene &scene, const RenderHookEvent &event,
+    const TargetIdentity &identity, std::uint64_t objectToken,
+    std::span<const PixelRect> frameDamage) {
+  if (identity.owner.empty() || identity.targetId.empty())
+    return Result<std::vector<std::size_t>>::failure({
+        .code = ErrorCode::InvalidRequest,
+        .path = "identity",
+        .message = "window decoration identity must be complete",
+    });
+  if (event.hook != RenderHookStage::PreWindow ||
+      event.stageObjectToken == 0U || event.stageObjectToken != objectToken)
+    return Result<std::vector<std::size_t>>::failure({
+        .code = ErrorCode::InvalidRequest,
+        .path = "event.stage_object_token",
+        .message =
+            "window decoration must match an exact pre-window render event",
+    });
+
+  auto frame = planGlassFrame(scene, event, frameDamage);
+  if (!frame)
+    return Result<std::vector<std::size_t>>::failure(frame.error());
+
+  std::vector<std::size_t> selected;
+  for (const auto index : frame.value().drawIndices) {
+    if (index >= scene.draws.size())
+      return Result<std::vector<std::size_t>>::failure({
+          .code = ErrorCode::InternalError,
+          .path = "frame.draw_indices",
+          .message = "frame references a draw absent from the scene",
+      });
+    if (scene.draws[index].key.identity != identity)
+      continue;
+    selected.push_back(index);
+  }
+  if (selected.size() > 1U)
+    return Result<std::vector<std::size_t>>::failure({
+        .code = ErrorCode::InternalError,
+        .path = "scene.draws",
+        .message = "window decoration identity resolves to more than one draw",
+    });
+  return Result<std::vector<std::size_t>>::success(std::move(selected));
+}
+
 } // namespace hfg::v2

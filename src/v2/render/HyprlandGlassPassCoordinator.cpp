@@ -11,6 +11,7 @@
 #include <hyprland/src/render/pass/PassElement.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <exception>
 #include <format>
 #include <span>
@@ -258,6 +259,12 @@ HyprlandGlassPassCoordinator::enqueue(const RenderHookEvent &event) {
   if (!scheduled)
     return Result<GlassPassEnqueueResult>::failure(scheduled.error());
 
+  for (const auto index : frame.value().drawIndices)
+    if (index >= m_scene.draws.size())
+      return failure<GlassPassEnqueueResult>(
+          ErrorCode::InternalError, "frame.draw_indices",
+          "frame references a draw absent from the scene");
+
   for (const auto &rect : frame.value().renderDamage)
     g_pHyprRenderer->m_renderData.damage.add(rect.x, rect.y, rect.width,
                                              rect.height);
@@ -267,21 +274,58 @@ HyprlandGlassPassCoordinator::enqueue(const RenderHookEvent &event) {
   for (const auto &resource : scheduled.value())
     g_pHyprRenderer->m_renderPass.add(makeUnique<V2CapturePass>(
         m_execution, resource.token, resource.plan, event.output));
-  for (const auto index : frame.value().drawIndices) {
-    if (index >= m_scene.draws.size())
-      return failure<GlassPassEnqueueResult>(
-          ErrorCode::InternalError, "frame.draw_indices",
-          "frame references a draw absent from the scene");
-    g_pHyprRenderer->m_renderPass.add(makeUnique<V2GlassPass>(
-        m_execution, m_scene.draws[index], event.output));
-  }
+  const auto decorationOwned = event.hook == RenderHookStage::PreWindow;
+  if (!decorationOwned)
+    for (const auto index : frame.value().drawIndices)
+      g_pHyprRenderer->m_renderPass.add(makeUnique<V2GlassPass>(
+          m_execution, m_scene.draws[index], event.output));
 
   return Result<GlassPassEnqueueResult>::success({
       .capturePasses = scheduled.value().size(),
-      .drawPasses = frame.value().drawIndices.size(),
+      .drawPasses = decorationOwned ? 0U : frame.value().drawIndices.size(),
       .renderDamage = std::move(frame.value().renderDamage),
       .continuationDamage = std::move(frame.value().continuationDamage),
       .directScanoutBlockRequired = frame.value().blockDirectScanout,
+  });
+}
+
+Result<GlassPassEnqueueResult>
+HyprlandGlassPassCoordinator::enqueueWindowDecoration(
+    const RenderHookEvent &event, const TargetIdentity &identity,
+    std::uint64_t objectToken, double opacity) {
+  if (!m_execution)
+    return failure<GlassPassEnqueueResult>(
+        ErrorCode::InternalError, "execution",
+        "glass pass execution state is unavailable");
+  if (!g_pHyprRenderer)
+    return failure<GlassPassEnqueueResult>(ErrorCode::UnsupportedOperation,
+                                           "renderer",
+                                           "Hyprland renderer is unavailable");
+  if (!std::isfinite(opacity) || opacity < 0.0 || opacity > 1.0)
+    return failure<GlassPassEnqueueResult>(
+        ErrorCode::InvalidRequest, "opacity",
+        "window decoration opacity must be finite from 0 through 1");
+
+  auto damage = currentFrameDamage(event.output.snapshot);
+  if (!damage)
+    return Result<GlassPassEnqueueResult>::failure(damage.error());
+  auto selected = planWindowDecorationDraws(m_scene, event, identity,
+                                            objectToken, damage.value());
+  if (!selected)
+    return Result<GlassPassEnqueueResult>::failure(selected.error());
+
+  for (const auto index : selected.value()) {
+    auto draw = m_scene.draws[index];
+    draw.opacity = opacity;
+    g_pHyprRenderer->m_renderPass.add(
+        makeUnique<V2GlassPass>(m_execution, std::move(draw), event.output));
+  }
+  return Result<GlassPassEnqueueResult>::success({
+      .capturePasses = 0,
+      .drawPasses = selected.value().size(),
+      .renderDamage = {},
+      .continuationDamage = {},
+      .directScanoutBlockRequired = !selected.value().empty(),
   });
 }
 

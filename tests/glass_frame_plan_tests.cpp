@@ -193,6 +193,64 @@ int main() {
              require(result.hasValue() && !result.value().blockDirectScanout,
                      "glass on another output blocked scanout");
            }},
+      Case{"window decoration selects only its exact target identity",
+           [] {
+             auto first = draw(8, RenderStage::PreWindow, 55);
+             first.key.identity = {.owner = "client:first",
+                                   .targetId = "glass"};
+             auto second = first;
+             second.key.identity = {.owner = "client:second",
+                                    .targetId = "glass"};
+             second.destination.x += 30.0;
+             second.destinationPixels.x += 30.0;
+             second.damageCoverage.x += 30;
+             const GlassRenderScene scene{
+                 .resources =
+                     {
+                         CaptureResource{
+                             .token = 8,
+                             .plan = capture(RenderStage::PreWindow, 55),
+                         },
+                     },
+                 .draws = {first, second},
+                 .inactive = {},
+                 .suppressed = {},
+                 .targetFailures = {},
+                 .captureFailures = {},
+                 .drawFailures = {},
+             };
+             const std::array damage{PixelRect{0, 0, 300, 300}};
+             const auto selected = planWindowDecorationDraws(
+                 scene, event(RenderHookStage::PreWindow, 55),
+                 first.key.identity, 55, damage);
+             require(selected.hasValue() &&
+                         selected.value() == std::vector<std::size_t>{0},
+                     "decoration selected a sibling target");
+           }},
+      Case{"window decoration requires the exact compositor object",
+           [] {
+             const auto selected = draw(8, RenderStage::PreWindow, 55);
+             const GlassRenderScene scene{
+                 .resources =
+                     {
+                         CaptureResource{
+                             .token = 8,
+                             .plan = capture(RenderStage::PreWindow, 55),
+                         },
+                     },
+                 .draws = {selected},
+                 .inactive = {},
+                 .suppressed = {},
+                 .targetFailures = {},
+                 .captureFailures = {},
+                 .drawFailures = {},
+             };
+             const std::array damage{PixelRect{0, 0, 300, 300}};
+             require(!planWindowDecorationDraws(
+                         scene, event(RenderHookStage::PreWindow, 55),
+                         selected.key.identity, 56, damage),
+                     "decoration accepted a different window object");
+           }},
       Case{"stale resource and malformed damage fail closed",
            [] {
              auto stale = scene();

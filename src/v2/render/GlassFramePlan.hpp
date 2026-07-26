@@ -26,4 +26,9 @@ struct GlassFramePlan {
 planGlassFrame(const GlassRenderScene &scene, const RenderHookEvent &event,
                std::span<const PixelRect> frameDamage);
 
+[[nodiscard]] Result<std::vector<std::size_t>> planWindowDecorationDraws(
+    const GlassRenderScene &scene, const RenderHookEvent &event,
+    const TargetIdentity &identity, std::uint64_t objectToken,
+    std::span<const PixelRect> frameDamage);
+
 } // namespace hfg::v2

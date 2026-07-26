@@ -47,6 +47,11 @@ public:
   [[nodiscard]] Result<GlassPassEnqueueResult>
   enqueue(const RenderHookEvent &event);
 
+  [[nodiscard]] Result<GlassPassEnqueueResult>
+  enqueueWindowDecoration(const RenderHookEvent &event,
+                          const TargetIdentity &identity,
+                          std::uint64_t objectToken, double opacity);
+
   [[nodiscard]] const GlassRenderScene &scene() const noexcept;
 
   void clear() noexcept;
