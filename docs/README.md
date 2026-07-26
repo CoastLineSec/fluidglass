@@ -27,12 +27,15 @@ v2 renderer remains inactive.
 
 ## Integration guides
 
-Quickshell, AGS, and generic-client guides will use the same runtime protocol.
 Framework names are client conventions and do not receive special behavior
-inside the plugin.
+inside the plugin:
 
-Integration guides will be added when the v2 renderer is available for live
-testing.
+- [Generic client](guides/generic-client.md)
+- [AGS](guides/ags.md)
+- [Quickshell](guides/quickshell.md)
+
+The guides cover the active v2 control plane and clearly gate rendering on the
+reported `rendering_ready` capability.
 
 ## Project boundary
 
