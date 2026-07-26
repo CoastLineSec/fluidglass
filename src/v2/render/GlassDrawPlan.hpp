@@ -64,6 +64,7 @@ struct GlassDrawPlan {
     double                          roundingPower = 2.0;
     MaterialUniforms                material;
     double                          opacity = 1.0;
+    bool                            transitionActive = false;
 
     friend bool operator==(
         const GlassDrawPlan&,

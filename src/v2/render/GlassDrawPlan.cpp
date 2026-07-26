@@ -1,6 +1,7 @@
 #include "v2/render/GlassDrawPlan.hpp"
 
 #include "v2/render/MaterialSampling.hpp"
+#include "v2/render/ShapeMotion.hpp"
 
 #include <algorithm>
 #include <array>
@@ -554,6 +555,13 @@ buildGlassDrawPlan(
         return Result<GlassDrawPlan>::failure(corners.error());
 
     const auto& planned = assignment.presentation;
+    auto movingShape = resolveShapeMotion(
+        planned.target.definition.shape,
+        planned.target.transitionAnchorMs,
+        planned.motionTimeMs);
+    if (!movingShape)
+        return Result<GlassDrawPlan>::failure(
+            movingShape.error());
     const auto& geometry = planned.presentation.geometry;
     const auto& full = planned.target.attachment.globalGeometry;
     const auto scale = planned.output.snapshot.scale;
@@ -576,7 +584,7 @@ buildGlassDrawPlan(
             .height = geometry.clippedGlobal.height * scale,
         },
         .shapePixels = scaleShape(
-            planned.target.definition.shape,
+            movingShape.value().shape,
             scale),
         .roundingPower = planned.target.roundingPower,
         .material = resolveMaterialUniforms(
@@ -585,6 +593,9 @@ buildGlassDrawPlan(
             full.height,
             scale),
         .opacity = planned.presentation.opacity,
+        .transitionActive =
+            planned.target.transitionActive ||
+            movingShape.value().active,
     });
 }
 

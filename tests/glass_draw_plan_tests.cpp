@@ -566,7 +566,7 @@ int main() {
                     ringShape->thickness == 16.0,
                 "ring shape did not scale");
         }},
-        Case{"compound shape lengths scale without changing time", [] {
+        Case{"settled compound shape lengths scale", [] {
             CompoundShape shape;
             shape.base = CompoundBase{
                 .corners = {10.0, 11.0, 12.0, 13.0},
@@ -587,7 +587,7 @@ int main() {
                         .phase = TransitionPhase::Enter,
                         .edge = TransitionEdge::Top,
                         .durationMs = 200,
-                        .elapsedMs = 100,
+                        .elapsedMs = 200,
                         .travel = 10.0,
                         .easing = {},
                     },
@@ -616,19 +616,57 @@ int main() {
                         Rect{30.0, 45.0, 150.0, 60.0} &&
                     scaled->parts.front().rect ==
                         Rect{37.5, 52.5, 30.0, 15.0} &&
-                    scaled->parts.front()
-                            .transition->motion.travel ==
-                        15.0 &&
-                    scaled->parts.front()
-                            .transition->protrusion ==
-                        9.0 &&
-                    scaled->parts.front()
-                            .transition->motion.elapsedMs ==
-                        100 &&
+                    !scaled->parts.front().transition &&
                     scaled->connectors.front() ==
                         Rect{15.0, 30.0, 7.5, 9.0} &&
                     scaled->connectorCurve == 13.5,
                 "compound pixel scaling changed geometry or time");
+        }},
+        Case{"compound part motion resolves at scene time", [] {
+            CompoundShape shape;
+            shape.parts.push_back({
+                .rect = {100.0, 100.0, 80.0, 40.0},
+                .corners = {},
+                .junctions = {},
+                .materialExtent =
+                    Rect{90.0, 90.0, 100.0, 60.0},
+                .transition = PartTransition{
+                    .motion = Transition{
+                        .id = "part-1",
+                        .phase = TransitionPhase::Enter,
+                        .edge = TransitionEdge::Top,
+                        .durationMs = 200,
+                        .elapsedMs = 0,
+                        .travel = 40.0,
+                        .easing = {},
+                    },
+                    .protrusion = 20.0,
+                },
+                .opacity = 0.8,
+            });
+            auto input = fixture(
+                Rect{100.0, 80.0, 240.0, 120.0},
+                OutputTransform::Normal,
+                1.0,
+                shape);
+            input.assignment.presentation.target
+                .transitionAnchorMs = 1000;
+            input.assignment.presentation.motionTimeMs = 1100;
+            const auto result = buildGlassDrawPlan(
+                input.assignment,
+                input.resource);
+            require(result.hasValue(), "moving shape plan failed");
+            const auto* compound =
+                std::get_if<CompoundShape>(
+                    &result.value().shapePixels);
+            require(
+                compound &&
+                    compound->parts.front().rect ==
+                        Rect{100.0, 90.0, 80.0, 30.0} &&
+                    compound->parts.front().opacity == 0.4 &&
+                    !compound->parts.front().transition &&
+                    result.value().transitionActive,
+                "part motion was not resolved before drawing");
         }},
         Case{"material uniforms preserve calibrated dark behavior", [] {
             auto input = fixture();
