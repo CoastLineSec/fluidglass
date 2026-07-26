@@ -82,6 +82,7 @@ add_library(hyprfluidglass-v2-core STATIC
     src/v2/render/CaptureResourcePlan.cpp
     src/v2/render/CaptureScene.cpp
     src/v2/render/Geometry.cpp
+    src/v2/render/GlassDrawPlan.cpp
     src/v2/render/MaterialSampling.cpp
     src/v2/render/OutputGeneration.cpp
     src/v2/render/PresentationScene.cpp
@@ -202,6 +203,12 @@ if(BUILD_TESTING)
     target_link_libraries(hyprfluidglass-geometry-tests PRIVATE hyprfluidglass-v2-core)
     target_compile_options(hyprfluidglass-geometry-tests PRIVATE -Wall -Wextra -Wpedantic)
     add_test(NAME hyprfluidglass-geometry COMMAND hyprfluidglass-geometry-tests)
+
+    add_executable(hyprfluidglass-glass-draw-plan-tests tests/glass_draw_plan_tests.cpp)
+    target_include_directories(hyprfluidglass-glass-draw-plan-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+    target_link_libraries(hyprfluidglass-glass-draw-plan-tests PRIVATE hyprfluidglass-v2-core)
+    target_compile_options(hyprfluidglass-glass-draw-plan-tests PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME hyprfluidglass-glass-draw-plan COMMAND hyprfluidglass-glass-draw-plan-tests)
 
     add_executable(hyprfluidglass-capture-plan-tests tests/capture_plan_tests.cpp)
     target_include_directories(hyprfluidglass-capture-plan-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests")
