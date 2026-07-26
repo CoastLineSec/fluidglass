@@ -18,10 +18,11 @@ validateHyprlandCaptureFormat(
         format->drmFormat != renderFormat ||
         format->glFormat == 0 ||
         format->glType == 0 ||
-        format->blockSize.x != 1.0 ||
-        format->blockSize.y != 1.0 ||
         format->bytesPerBlock == 0U ||
-        format->bytesPerBlock > 64U)
+        format->bytesPerBlock > 64U ||
+        Hyprgraphics::Egl::pixelsPerBlock(format) != 1 ||
+        Hyprgraphics::Egl::minStride(format, 1) !=
+            static_cast<int>(format->bytesPerBlock))
         return Result<CaptureFormatLayout>::failure({
             .code = ErrorCode::UnsupportedOperation,
             .path = "render_format",

@@ -21,7 +21,7 @@ Hyprgraphics::Egl::SPixelFormat format(
         .withAlpha = true,
         .alphaStripped = 0,
         .bytesPerBlock = bytesPerPixel,
-        .blockSize = {1.0, 1.0},
+        .blockSize = {},
         .swizzle = std::nullopt,
     };
 }
@@ -99,6 +99,15 @@ int main() {
                         DRM_FORMAT_ARGB8888,
                         &oversized),
                     "oversized pixel layout was accepted");
+
+            auto inconsistentStride = format(
+                DRM_FORMAT_ARGB8888,
+                4);
+            inconsistentStride.blockSize = {1.0, 2.0};
+            require(!validateHyprlandCaptureFormat(
+                        DRM_FORMAT_ARGB8888,
+                        &inconsistentStride),
+                    "inconsistent single-pixel stride was accepted");
         }},
     });
 }

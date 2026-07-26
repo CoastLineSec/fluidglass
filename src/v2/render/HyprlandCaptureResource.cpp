@@ -1,5 +1,7 @@
 #include "v2/render/HyprlandCaptureResource.hpp"
 
+#include "v2/render/HyprlandCaptureFormat.hpp"
+
 #include <hyprgraphics/egl/Egl.hpp>
 #include <hyprland/src/render/OpenGL.hpp>
 
@@ -48,12 +50,11 @@ HyprlandCaptureResource::allocate(CapturePlan plan) {
 
     const auto* format = Hyprgraphics::Egl::getPixelFormatFromDRM(
         plan.key.renderFormat);
+    const auto layout =
+        hyprlandCaptureFormatLayout(plan.key.renderFormat);
     if (!format ||
-        format->glFormat == 0 ||
-        format->glType == 0 ||
-        format->blockSize.x != 1.0 ||
-        format->blockSize.y != 1.0 ||
-        format->bytesPerBlock != plan.bytesPerPixel)
+        !layout ||
+        layout.value().bytesPerPixel != plan.bytesPerPixel)
         return failure(
             ErrorCode::UnsupportedOperation,
             "plan.key.render_format",
