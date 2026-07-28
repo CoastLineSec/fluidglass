@@ -485,13 +485,12 @@ Result<std::array<TextureCoordinate, 4>> sourceCorners(
          ++index) {
         const auto& point =
             geometry.semanticCorners[index];
+        // The capture keeps the framebuffer's top-down row order, so v runs
+        // with y rather than against it.
         const auto u =
             (point.x - capture.region.x) / width;
         const auto v =
-            (capture.region.y +
-                capture.region.height -
-                point.y) /
-            height;
+            (point.y - capture.region.y) / height;
         if (!std::isfinite(u) || !std::isfinite(v) ||
             u < -UV_TOLERANCE ||
             u > 1.0 + UV_TOLERANCE ||

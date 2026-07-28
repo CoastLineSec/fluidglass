@@ -53,14 +53,14 @@ CapturePlan plan(PixelRect region) {
 
 int main() {
     return hfg::test::run({
-        Case{"top-left coverage maps to bottom-left blit coordinates", [] {
+        Case{"coverage keeps top-down rows in both rectangles", [] {
             const auto result = captureBlitFor(
                 plan(PixelRect{.x = 100, .y = 200, .width = 300, .height = 150}),
                 output());
             require(result.hasValue(), "capture blit mapping failed");
             require(
-                result.value().source == BlitRect{100, 730, 400, 880},
-                "source coordinate conversion changed");
+                result.value().source == BlitRect{100, 200, 400, 350},
+                "source no longer reads the covered rows");
             require(
                 result.value().destination == BlitRect{0, 0, 300, 150},
                 "destination rectangle changed");
@@ -70,13 +70,13 @@ int main() {
                 plan(PixelRect{.x = 0, .y = 0, .width = 10, .height = 20}),
                 output());
             require(top.hasValue(), "top-edge mapping failed");
-            require(top.value().source == BlitRect{0, 1060, 10, 1080}, "top edge moved");
+            require(top.value().source == BlitRect{0, 0, 10, 20}, "top edge moved");
 
             const auto bottom = captureBlitFor(
                 plan(PixelRect{.x = 0, .y = 1060, .width = 10, .height = 20}),
                 output());
             require(bottom.hasValue(), "bottom-edge mapping failed");
-            require(bottom.value().source == BlitRect{0, 0, 10, 20}, "bottom edge moved");
+            require(bottom.value().source == BlitRect{0, 1060, 10, 1080}, "bottom edge moved");
         }},
         Case{"rotated output uses already-mapped framebuffer coverage", [] {
             auto rotated = output();
@@ -90,7 +90,7 @@ int main() {
                 rotated);
             require(result.hasValue(), "rotated-output blit mapping failed");
             require(
-                result.value().source == BlitRect{20, 1620, 60, 1820},
+                result.value().source == BlitRect{20, 100, 60, 300},
                 "rotated framebuffer coverage was transformed twice");
         }},
         Case{"uninitialized captures receive one complete baseline", [] {
@@ -111,7 +111,7 @@ int main() {
                     result.value() ==
                         std::vector{
                             CaptureBlit{
-                                .source = {100, 730, 400, 880},
+                                .source = {100, 200, 400, 350},
                                 .destination = {0, 0, 300, 150},
                             },
                         },
@@ -136,8 +136,8 @@ int main() {
                     result.value() ==
                         std::vector{
                             CaptureBlit{
-                                .source = {120, 840, 130, 860},
-                                .destination = {20, 110, 30, 130},
+                                .source = {120, 220, 130, 240},
+                                .destination = {20, 20, 30, 40},
                             },
                         },
                 "partial capture overwrote retained undamaged pixels");
@@ -167,8 +167,8 @@ int main() {
                     result.value() ==
                         std::vector{
                             CaptureBlit{
-                                .source = {1890, 780, 1910, 980},
-                                .destination = {90, 780, 110, 980},
+                                .source = {1890, 100, 1910, 300},
+                                .destination = {90, 100, 110, 300},
                             },
                         },
                 "transform-three damage used the wrong coordinate space");

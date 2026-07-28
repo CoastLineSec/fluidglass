@@ -37,6 +37,7 @@ add_library(hyprfluidglass SHARED
     src/v2/render/HyprlandCaptureResource.cpp
     src/v2/render/HyprlandCaptureResourceManager.cpp
     src/v2/render/HyprlandDirectScanoutInhibitor.cpp
+    src/v2/render/HyprlandGlassBlur.cpp
     src/v2/render/HyprlandGlassDrawExecutor.cpp
     src/v2/render/HyprlandGlassPassCoordinator.cpp
     src/v2/render/HyprlandGlassShader.cpp
@@ -249,6 +250,14 @@ if(BUILD_TESTING)
     target_link_libraries(hyprfluidglass-glass-render-scene-tests PRIVATE hyprfluidglass-v2-core)
     target_compile_options(hyprfluidglass-glass-render-scene-tests PRIVATE -Wall -Wextra -Wpedantic)
     add_test(NAME hyprfluidglass-glass-render-scene COMMAND hyprfluidglass-glass-render-scene-tests)
+
+    add_executable(hyprfluidglass-presentation-resource-cache-tests tests/presentation_resource_cache_tests.cpp)
+    target_include_directories(hyprfluidglass-presentation-resource-cache-tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests"
+    )
+    target_compile_options(hyprfluidglass-presentation-resource-cache-tests PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME hyprfluidglass-presentation-resource-cache COMMAND hyprfluidglass-presentation-resource-cache-tests)
 
     add_executable(hyprfluidglass-glass-shader-source-tests tests/glass_shader_source_tests.cpp)
     target_include_directories(hyprfluidglass-glass-shader-source-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests")

@@ -236,15 +236,40 @@ void requireUvMatchesCapture(
             (point.x - capture.region.x) /
             capture.region.width;
         const auto expectedV =
-            (capture.region.y +
-                capture.region.height -
-                point.y) /
+            (point.y - capture.region.y) /
             capture.region.height;
         require(
             near(plan.sourceCorners[index].u, expectedU) &&
                 near(plan.sourceCorners[index].v, expectedV),
             "capture UV did not preserve semantic corner mapping");
     }
+}
+
+/** Asserts orientation intent without restating the mapping formula. */
+void requireUprightOrientation(
+    const GlassDrawPlan& plan,
+    const MappedGeometry& geometry) {
+    std::size_t topmost = 0;
+    std::size_t bottommost = 0;
+    for (std::size_t index = 1;
+         index < geometry.semanticCorners.size();
+         ++index) {
+        if (geometry.semanticCorners[index].y <
+            geometry.semanticCorners[topmost].y)
+            topmost = index;
+        if (geometry.semanticCorners[index].y >
+            geometry.semanticCorners[bottommost].y)
+            bottommost = index;
+    }
+    require(
+        geometry.semanticCorners[topmost].y <
+            geometry.semanticCorners[bottommost].y,
+        "fixture must span more than one row to prove orientation");
+    require(
+        plan.sourceCorners[topmost].v <
+            plan.sourceCorners[bottommost].v,
+        "capture sampling is vertically mirrored: the upper edge of the "
+        "target reads from lower in the capture");
 }
 
 } // namespace
@@ -285,6 +310,10 @@ int main() {
                 input.assignment.presentation
                     .presentation.geometry,
                 input.resource.plan);
+            requireUprightOrientation(
+                plan,
+                input.assignment.presentation
+                    .presentation.geometry);
         }},
         Case{"fractional scale is applied once", [] {
             auto input = fixture(
@@ -352,6 +381,10 @@ int main() {
                     input.assignment.presentation
                         .presentation.geometry,
                     input.resource.plan);
+                requireUprightOrientation(
+                    result.value(),
+                    input.assignment.presentation
+                        .presentation.geometry);
                 const auto expectedDamage =
                     mapBufferPixelRectToOutput(
                         input.assignment.presentation
@@ -404,6 +437,10 @@ int main() {
                 input.assignment.presentation
                     .presentation.geometry,
                 larger);
+            requireUprightOrientation(
+                result.value(),
+                input.assignment.presentation
+                    .presentation.geometry);
         }},
         Case{"capture identity mismatch fails closed", [] {
             auto input = fixture();

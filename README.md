@@ -29,7 +29,7 @@ contract is generic — anything that can call `hyprctl` can drive it.
 
 - **Real backdrop capture** — refracts the actual content behind each element,
   not a static blur.
-- **Tunable material** — frost (Gaussian, dithered), edge lensing/refraction,
+- **Tunable material** — separable Gaussian frost, edge lensing/refraction,
   convex bevel (inner highlight + shadow), specular rim.
 - **Independent blur & tint** — drive them together from a single `glassLevel`,
   or set `blurLevel` / `tintLevel` separately.
@@ -84,10 +84,9 @@ when iterating, since Hyprland's loader caches plugins by path.
 
 ## Usage
 
-The plugin keeps the v1 compatibility commands and exposes the active,
-versioned v2 control plane. New clients should use v2 sessions. Existing v1
-clients continue to render through the compatibility path during the
-deprecation window.
+The plugin keeps the v1 command set and exposes a separate, versioned v2
+control plane. New clients should use v2 sessions. Existing v1 clients continue
+to use the established v1 renderer during the deprecation window.
 
 | Command | Purpose |
 |---|---|
@@ -176,7 +175,7 @@ same frame. Outputs carrying active glass targets receive a scoped
 direct-scanout inhibition lease so Hyprland cannot bypass the compositor render
 path while the effect is needed.
 
-The v1 compatibility renderer uses its established full-frame path:
+The independent v1 renderer uses its established full-frame path:
 
 1. A `CCapturePass` copies the monitor's current framebuffer into a feedback-safe
    texture at `RENDER_POST_WINDOWS`.

@@ -36,7 +36,6 @@ struct GlassShaderUniforms {
   GLint connectorCount = -1;
   GLint connectorRects = -1;
   GLint connectorCurve = -1;
-  GLint blurPixels = -1;
   GLint refractionPixels = -1;
   GLint edgeBandPixels = -1;
   GLint bevelPixels = -1;

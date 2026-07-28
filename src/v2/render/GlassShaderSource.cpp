@@ -55,7 +55,6 @@ uniform int uConnectorCount;
 uniform vec4 uConnectorRects[MAX_CONNECTORS];
 uniform float uConnectorCurve;
 
-uniform float uBlurPixels;
 uniform float uRefractionPixels;
 uniform float uEdgeBandPixels;
 uniform float uBevelPixels;
@@ -275,27 +274,10 @@ vec3 captured(vec2 localPixel) {
     return texture(uCapture, captureCoordinate(localPixel)).rgb;
 }
 
+// Frost is resolved by separable Gaussian passes before this shader. uCapture
+// contains either that result or the sharp fallback.
 vec3 frosted(vec2 localPixel) {
-    float radius = max(uBlurPixels, 0.0);
-    if (radius < 0.5)
-        return captured(localPixel);
-    vec2 quarter = vec2(radius * 0.25);
-    vec2 halfRadius = vec2(radius * 0.5);
-    vec2 fullRadius = vec2(radius);
-    vec3 color = captured(localPixel) * 0.20;
-    color += captured(localPixel + vec2(quarter.x, 0.0)) * 0.10;
-    color += captured(localPixel - vec2(quarter.x, 0.0)) * 0.10;
-    color += captured(localPixel + vec2(0.0, quarter.y)) * 0.10;
-    color += captured(localPixel - vec2(0.0, quarter.y)) * 0.10;
-    color += captured(localPixel + halfRadius) * 0.075;
-    color += captured(localPixel - halfRadius) * 0.075;
-    color += captured(localPixel + vec2(halfRadius.x, -halfRadius.y)) * 0.075;
-    color += captured(localPixel + vec2(-halfRadius.x, halfRadius.y)) * 0.075;
-    color += captured(localPixel + vec2(fullRadius.x, 0.0)) * 0.025;
-    color += captured(localPixel - vec2(fullRadius.x, 0.0)) * 0.025;
-    color += captured(localPixel + vec2(0.0, fullRadius.y)) * 0.025;
-    color += captured(localPixel - vec2(0.0, fullRadius.y)) * 0.025;
-    return color;
+    return captured(localPixel);
 }
 
 void main() {

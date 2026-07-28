@@ -279,18 +279,11 @@ invalidate the generation and retire the old resources.
 
 ## Compatibility
 
-The current v1 dispatchers and renderer remain temporarily available while
-clients migrate. A bounded compatibility translator validates how legacy
-window, layer, and region targets map into the reserved v2 owner
-`client:compatibility-v1:reserved`. The translator does not grant the legacy
-path additional authority, and v1 and v2 state never share an owner.
-
-The adapter will be removed only after:
-
-- Quickshell compatibility is proven through v2;
-- AGS and generic-client examples are available;
-- migration instructions are published;
-- the deprecation window is announced.
+The v1 dispatchers and renderer remain independently available while clients
+migrate. Live v1 requests do not pass through the v2 runtime. The bounded
+compatibility translator validates legacy-to-v2 mappings in its test surface,
+but is not wired into the live dispatchers. V1 and v2 render state therefore
+remain separate.
 
 ## Diagnostics and privacy
 

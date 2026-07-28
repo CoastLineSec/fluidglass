@@ -93,7 +93,6 @@ void uploadUniforms(const GlassShaderUniforms &locations,
                connectorRects.data());
   glUniform1f(locations.connectorCurve, values.connectorCurve);
 
-  glUniform1f(locations.blurPixels, values.blurPixels);
   glUniform1f(locations.refractionPixels, values.refractionPixels);
   glUniform1f(locations.edgeBandPixels, values.edgeBandPixels);
   glUniform1f(locations.bevelPixels, values.bevelPixels);
@@ -187,7 +186,8 @@ Result<void> validateRuntime(const GlassDrawPlan &plan,
 Result<bool> drawGlass(const GlassDrawPlan &plan, std::uint64_t resourceToken,
                        const HyprlandCaptureResource &resource,
                        const OutputGeneration &output,
-                       HyprlandGlassShader &shader) {
+                       HyprlandGlassShader &shader,
+                       HyprlandGlassBlur &blur) {
   if (auto valid = validateRuntime(plan, resourceToken, resource, output);
       !valid)
     return Result<bool>::failure(valid.error());
@@ -238,9 +238,34 @@ Result<bool> drawGlass(const GlassDrawPlan &plan, std::uint64_t resourceToken,
                               "Hyprland rejected the v2 glass shader",
                           });
 
+  // Frost first, then draw. A failed blur is not fatal: the sharp capture is
+  // still a correct backdrop, so the surface degrades to unfrosted glass
+  // rather than losing its material, matching v1's fallback.
+  GLuint backdrop = resource.texture();
+  if (payload.value().blurPixels >= 0.5F) {
+    auto frosted = blur.execute(
+        resource.texture(),
+        plan.capture.region.width,
+        plan.capture.region.height,
+        payload.value().blurPixels);
+    if (frosted)
+      backdrop = frosted.value();
+  }
+
+  // The blur passes rebind the program and vertex array, so the glass shader
+  // has to be reselected before its own uniforms are uploaded.
+  const auto redrawn = Render::GL::g_pHyprOpenGL->useShader(tracked);
+  if (!redrawn || redrawn->program() == 0U)
+    return restoreFailure(*state.value(),
+                          Error{
+                              ErrorCode::UnsupportedOperation,
+                              "renderer.shader",
+                              "Hyprland rejected the v2 glass shader",
+                          });
+
   active->setUniformMatrix3fv(SHADER_PROJ, 1, GL_TRUE, projection.getMatrix());
   glActiveTexture(GL_TEXTURE0);
-  glBindTexture(GL_TEXTURE_2D, resource.texture());
+  glBindTexture(GL_TEXTURE_2D, backdrop);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);

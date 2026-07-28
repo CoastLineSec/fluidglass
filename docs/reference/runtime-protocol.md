@@ -567,7 +567,7 @@ part transition. When omitted, `protrusion` defaults to `travel`.
 
 A heartbeat renews the lease only when the token and current generation match.
 It does not alter materials or targets. When a lease expires, the plugin
-detaches the session and emits an `expired` readiness event.
+detaches the session and removes its target-readiness records.
 
 Successful result:
 
@@ -629,36 +629,11 @@ The session token is required because inspection can expose selector and
 attachment information. The response includes definition state, resolution
 state, presentation keys, readiness, and the latest sanitized failure.
 
-## Readiness events
+## Readiness inspection
 
-The plugin posts Hyprland IPC events with event name:
-
-```text
-hyprfluidglass
-```
-
-The event data is one compact JSON object:
-
-```json
-{
-  "version": 2,
-  "event": "target.readiness",
-  "owner": "client:example-shell:opaque-session-id",
-  "generation": 1,
-  "target_id": "primary-bar",
-  "presentation": {
-    "output": "DP-1",
-    "output_generation": 7,
-    "stage": "post-layer"
-  },
-  "state": "drawn"
-}
-```
-
-Clients receive these on Hyprland's event socket using the same mechanism as
-other compositor events. Events are notifications, not an authority: a client
-reconnects by calling `status` or `target.inspect` after an event-socket
-disconnect.
+Readiness is available through `target.inspect`. The current v2 runtime does
+not post target-readiness notifications to Hyprland's event socket, so clients
+use bounded inspection while synchronization is incomplete.
 
 The readiness sequence is:
 
@@ -679,7 +654,7 @@ expired
 detached
 ```
 
-`drawn` is emitted only after the render pass completes a successful draw for
+`drawn` is recorded only after the render pass completes a successful draw for
 that presentation.
 
 ## Error codes

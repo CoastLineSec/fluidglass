@@ -5,6 +5,7 @@
 #include "v2/render/HyprlandCaptureExecutor.hpp"
 #include "v2/render/HyprlandGlassDrawExecutor.hpp"
 #include "v2/render/HyprlandGlassShader.hpp"
+#include "v2/render/PresentationResourceCache.hpp"
 
 #include <hyprland/src/debug/log/Logger.hpp>
 #include <hyprland/src/render/Renderer.hpp>
@@ -15,6 +16,7 @@
 #include <cmath>
 #include <exception>
 #include <format>
+#include <memory>
 #include <span>
 #include <string>
 #include <string_view>
@@ -27,6 +29,7 @@ struct HyprlandGlassPassExecutionState {
   RenderStageScheduler scheduler;
   CaptureExecutionTracker captures;
   HyprlandGlassShader shader;
+  PresentationResourceCache<HyprlandGlassBlur> blurs;
   std::weak_ptr<GlassPassObserver> observer;
 };
 
@@ -81,6 +84,12 @@ void reportDraw(const std::shared_ptr<HyprlandGlassPassExecutionState> &executio
         observer->onDrawResult(key, frameToken, error);
   } catch (...) {
   }
+}
+
+std::shared_ptr<HyprlandGlassBlur> blurFor(
+    const std::shared_ptr<HyprlandGlassPassExecutionState> &execution,
+    const PresentationKey &key) {
+  return execution->blurs.resourceFor(key);
 }
 
 class V2CapturePass final : public IPassElement {
@@ -181,7 +190,8 @@ public:
               GlassDrawPlan plan, OutputGeneration output,
               std::uint64_t frameToken)
       : m_execution(std::move(execution)), m_plan(std::move(plan)),
-        m_output(std::move(output)), m_frameToken(frameToken) {}
+        m_output(std::move(output)), m_frameToken(frameToken),
+        m_blur(blurFor(m_execution, m_plan.key)) {}
 
   bool needsLiveBlur() override { return false; }
   bool needsPrecomputeBlur() override { return false; }
@@ -228,7 +238,8 @@ public:
           m_plan.resourceToken,
           *resource,
           m_output,
-          m_execution->shader);
+          m_execution->shader,
+          *m_blur);
       if (!drawn) {
         logPassFailure(passName(), drawn.error());
         reportDraw(m_execution, m_plan.key, m_frameToken, drawn.error());
@@ -262,6 +273,7 @@ private:
   GlassDrawPlan m_plan;
   OutputGeneration m_output;
   std::uint64_t m_frameToken = 0;
+  std::shared_ptr<HyprlandGlassBlur> m_blur;
 };
 
 Result<std::vector<PixelRect>>
@@ -325,6 +337,11 @@ HyprlandGlassPassCoordinator::reconcile(const CaptureScene &captures,
     return Result<GlassSceneReconcileResult>::failure(scene.error());
 
   m_scene = scene.value();
+  std::vector<PresentationKey> activeBlurResources;
+  activeBlurResources.reserve(m_scene.draws.size());
+  for (const auto &draw : m_scene.draws)
+    activeBlurResources.push_back(draw.key);
+  m_execution->blurs.retain(activeBlurResources);
   for (const auto token : resources.value().retiredTokens)
     m_execution->captures.retire(token);
   return Result<GlassSceneReconcileResult>::success({
@@ -466,6 +483,7 @@ void HyprlandGlassPassCoordinator::clear() noexcept {
   m_execution->scheduler.clear();
   m_execution->captures.clear();
   m_execution->resources.clear();
+  m_execution->blurs.clear();
   m_execution->shader.reset();
 }
 

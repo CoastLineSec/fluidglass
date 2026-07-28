@@ -42,35 +42,34 @@ std::optional<PixelRect> intersection(
     };
 }
 
+/**
+ * Builds one blit from the render framebuffer into the capture texture.
+ * Source and destination use the same top-down buffer-row convention, so the
+ * blit preserves vertical orientation.
+ */
 CaptureBlit blitForRegion(
     const PixelRect& region,
-    const CapturePlan& plan,
-    const OutputSnapshot& output) {
+    const CapturePlan& plan) {
     const auto sourceRight =
         static_cast<std::int32_t>(region.x + region.width);
     const auto sourceBottom =
         static_cast<std::int32_t>(region.y + region.height);
-    const auto captureBottom =
-        static_cast<std::int32_t>(
-            plan.region.y + plan.region.height);
     return {
         .source = {
             .x0 = region.x,
-            .y0 = static_cast<std::int32_t>(
-                output.bufferHeight - sourceBottom),
+            .y0 = region.y,
             .x1 = sourceRight,
-            .y1 = static_cast<std::int32_t>(
-                output.bufferHeight - region.y),
+            .y1 = sourceBottom,
         },
         .destination = {
             .x0 = static_cast<std::int32_t>(
                 region.x - plan.region.x),
             .y0 = static_cast<std::int32_t>(
-                captureBottom - sourceBottom),
+                region.y - plan.region.y),
             .x1 = static_cast<std::int32_t>(
                 sourceRight - plan.region.x),
             .y1 = static_cast<std::int32_t>(
-                captureBottom - region.y),
+                sourceBottom - plan.region.y),
         },
     };
 }
@@ -106,7 +105,7 @@ Result<CaptureBlit> captureBlitFor(
             "capture region exceeds the output buffer");
 
     return Result<CaptureBlit>::success(
-        blitForRegion(plan.region, plan, output.snapshot));
+        blitForRegion(plan.region, plan));
 }
 
 Result<std::vector<CaptureBlit>> captureUpdateBlits(
@@ -140,10 +139,7 @@ Result<std::vector<CaptureBlit>> captureUpdateBlits(
             plan.region);
         if (!clipped)
             continue;
-        result.push_back(blitForRegion(
-            *clipped,
-            plan,
-            output.snapshot));
+        result.push_back(blitForRegion(*clipped, plan));
     }
     return Result<std::vector<CaptureBlit>>::success(
         std::move(result));

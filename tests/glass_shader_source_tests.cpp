@@ -65,7 +65,6 @@ int main() {
         Case{"fragment shader includes the complete material input", [] {
             const auto source = glassFragmentShaderSource();
             for (const auto token : {
-                     "uBlurPixels",
                      "uRefractionPixels",
                      "uEdgeBandPixels",
                      "uBevelPixels",
