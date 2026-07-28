@@ -553,6 +553,26 @@ buildGlassDrawPlan(
         resource.plan);
     if (!corners)
         return Result<GlassDrawPlan>::failure(corners.error());
+    auto damageCoverage = mapBufferPixelRectToOutput(
+        assignment.presentation.presentation.geometry.coverage,
+        output);
+    if (!damageCoverage)
+        return Result<GlassDrawPlan>::failure({
+            .code = damageCoverage.error().code,
+            .path = "assignment.presentation.geometry.coverage." +
+                damageCoverage.error().path,
+            .message = damageCoverage.error().message,
+        });
+    auto captureDamageCoverage = mapBufferPixelRectToOutput(
+        resource.plan.region,
+        output);
+    if (!captureDamageCoverage)
+        return Result<GlassDrawPlan>::failure({
+            .code = captureDamageCoverage.error().code,
+            .path = "resource.plan.region." +
+                captureDamageCoverage.error().path,
+            .message = captureDamageCoverage.error().message,
+        });
 
     const auto& planned = assignment.presentation;
     auto movingShape = resolveShapeMotion(
@@ -576,7 +596,9 @@ buildGlassDrawPlan(
             .width = geometry.outputLocal.width * scale,
             .height = geometry.outputLocal.height * scale,
         },
-        .damageCoverage = geometry.coverage,
+        .damageCoverage = damageCoverage.value(),
+        .captureDamageCoverage =
+            captureDamageCoverage.value(),
         .sourceCorners = std::move(corners.value()),
         .fullSizePixels = {
             .width = full.width * scale,

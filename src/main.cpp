@@ -528,7 +528,7 @@ namespace mat {
     // backdrop stays visible even at max (measured dark-max alpha ~0.7).
     // THREE calibrated stops (min / med / max); the slider interpolates
     // piecewise between them. iOS curve is non-linear: sat + brightness hold
-    // through min & med, then swing at max. MAX is locked (James-approved);
+    // through min & med, then swing at max. The maximum calibration is fixed;
     // MIN/MED seeded from the iOS targets, tuned by comparison.
     constexpr double BLUR_MIN = 2.0,   BLUR_MED = 18.0,  BLUR_MAX = 88.0;   // px — min near-clear (text legible), med eased
     constexpr double VEIL_MIN = 0.43,  VEIL_MED = 0.43,  VEIL_MAX = 0.72;   // 1-transmittance (measured: min/med 0.57, max 0.28)
@@ -894,8 +894,8 @@ void main() {
         // thickness — a 40px bar strip carries ~24px bands (visible gradient)
         // while a 10px side strip wears a 6px hairline. The old global-min
         // scaling crushed the bars to the sides' scale; and a band WIDER than
-        // its strip has no gradient at all, which reads as no effect (James's
-        // "nothing on the top and bottom bars"). Pixels not in any strip
+        // its strip has no gradient at all, which reads as no effect on the
+        // top and bottom bars. Pixels not in any strip
         // (popout bodies inside the cutout) keep full bands. uRingFx remains
         // as a neutral global hook (CPU sends 1).
         if (uHasCutout > 0.5) {
@@ -1006,7 +1006,7 @@ void main() {
     // Whole-surface convex centre lens — adapted from OverShifted/LiquidGlass (see THIRD_PARTY_NOTICES.md).
     // Radial magnification of the backdrop toward centre — the "glassy centre" current lacked. Reads on
     // square-ish glass; faded out by aspect on wide shapes (a centre pull mirrors on a wide bar). Simple
-    // elements only; composite frames keep the edge optics. Strength 0.5 (the look James locked).
+    // elements only; composite frames keep the edge optics. Strength 0.5 is the fixed calibration.
     if (!composite) {
         float shortH2   = min(half_.x, half_.y);
         float aspect    = shortH2 / max(max(half_.x, half_.y), 1.0);    // 1 square → 0 wide
@@ -1114,7 +1114,7 @@ void main() {
     // Per-part fade: appearing/vanishing parts dissolve instead of popping.
     // CLIPPED TO INSIDE THE CUTOUT: parts are sent extended THROUGH the ring,
     // so an unclipped fade also erased the bar strip's own glass in the
-    // part's column (James's vanishing bottom bar). The ring band is
+    // part's column, which made the bottom bar vanish. The ring band is
     // permanent chrome — it never fades with a guest surface.
     float pA = 1.0;
     float insideHole = 1.0;
@@ -1354,7 +1354,7 @@ SP<Render::ITexture> captureBackdropForCurrentMonitor(const std::string& stageKe
     // previously-accumulated clean backdrop. A full-FB copy here grabbed stale
     // composite (including our own drawn glass) outside the damage region, so
     // cursor-trail / focus-burst frames fed the glass its own pixels back —
-    // the on/off-monitor strobe James reported. Full copy only on alloc/resize.
+    // the observed on/off-monitor strobe. Full copy only on alloc/resize.
     CRegion copyRegion = CRegion{CBox(0, 0, srcBox.width, srcBox.height)};
     if (!fullCopy) {
         copyRegion = g_pHyprRenderer->m_renderData.damage;
@@ -1662,7 +1662,7 @@ bool drawElement(const GlassElement& el, const SP<Render::ITexture>& capture) {
             if (i < static_cast<int>(el.parts.size())) {
                 const auto& part = el.parts[i];
                 mapRect(part.x, part.y, part.w, part.h, pr);
-                // POSITION-LOCKED THROAT (James's law): the junction arcs can
+                // POSITION-LOCKED THROAT: the junction arcs can
                 // never exceed the body's remaining protrusion through the
                 // ring — they bloom over the first k px of emergence and seal
                 // exactly as the retreating end passes back through the curve

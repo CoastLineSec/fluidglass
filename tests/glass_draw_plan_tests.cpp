@@ -268,7 +268,9 @@ int main() {
                         Rect{100.0, 80.0, 240.0, 120.0} &&
                     plan.damageCoverage ==
                         input.assignment.presentation
-                            .presentation.geometry.coverage,
+                            .presentation.geometry.coverage &&
+                    plan.captureDamageCoverage ==
+                        input.resource.plan.region,
                 "draw identity or destination changed");
             require(
                 plan.fullSizePixels ==
@@ -350,6 +352,25 @@ int main() {
                     input.assignment.presentation
                         .presentation.geometry,
                     input.resource.plan);
+                const auto expectedDamage =
+                    mapBufferPixelRectToOutput(
+                        input.assignment.presentation
+                            .presentation.geometry.coverage,
+                        input.assignment.presentation
+                            .output.snapshot);
+                const auto expectedCaptureDamage =
+                    mapBufferPixelRectToOutput(
+                        input.resource.plan.region,
+                        input.assignment.presentation
+                            .output.snapshot);
+                require(
+                    expectedDamage.hasValue() &&
+                        expectedCaptureDamage.hasValue() &&
+                        result.value().damageCoverage ==
+                            expectedDamage.value() &&
+                        result.value().captureDamageCoverage ==
+                            expectedCaptureDamage.value(),
+                    "transformed output damage remained in buffer space");
             }
         }},
         Case{"larger compatible capture drives source UVs", [] {

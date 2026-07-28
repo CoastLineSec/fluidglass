@@ -5,6 +5,8 @@
 #include "v2/render/OutputGeneration.hpp"
 
 #include <cstdint>
+#include <span>
+#include <vector>
 
 namespace hfg::v2 {
 
@@ -27,5 +29,11 @@ struct CaptureBlit {
 [[nodiscard]] Result<CaptureBlit> captureBlitFor(
     const CapturePlan& plan,
     const OutputGeneration& output);
+
+[[nodiscard]] Result<std::vector<CaptureBlit>> captureUpdateBlits(
+    const CapturePlan& plan,
+    const OutputGeneration& output,
+    std::span<const PixelRect> outputDamage,
+    bool initialized);
 
 } // namespace hfg::v2

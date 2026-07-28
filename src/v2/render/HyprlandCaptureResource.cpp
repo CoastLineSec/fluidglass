@@ -160,12 +160,25 @@ bool HyprlandCaptureResource::allocated() const noexcept {
     return m_framebuffer != 0U && m_texture != 0U;
 }
 
+bool HyprlandCaptureResource::initialized() const noexcept {
+    return allocated() && m_initialized;
+}
+
+void HyprlandCaptureResource::markInitialized() noexcept {
+    m_initialized = allocated();
+}
+
+void HyprlandCaptureResource::invalidate() noexcept {
+    m_initialized = false;
+}
+
 void HyprlandCaptureResource::release() noexcept {
     if (m_framebuffer == 0U && m_texture == 0U)
         return;
     if (!Render::GL::g_pHyprOpenGL) {
         m_framebuffer = 0U;
         m_texture = 0U;
+        m_initialized = false;
         return;
     }
     Render::GL::g_pHyprOpenGL->makeEGLCurrent();
@@ -175,6 +188,7 @@ void HyprlandCaptureResource::release() noexcept {
         glDeleteTextures(1, &m_texture);
     m_framebuffer = 0U;
     m_texture = 0U;
+    m_initialized = false;
 }
 
 } // namespace hfg::v2

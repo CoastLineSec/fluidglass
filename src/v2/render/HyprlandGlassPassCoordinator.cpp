@@ -87,9 +87,12 @@ class V2CapturePass final : public IPassElement {
 public:
   V2CapturePass(std::shared_ptr<HyprlandGlassPassExecutionState> execution,
                 std::uint64_t resourceToken, CapturePlan expected,
-                OutputGeneration output, std::uint64_t frameToken)
+                OutputGeneration output,
+                std::vector<PixelRect> outputDamage,
+                std::uint64_t frameToken)
       : m_execution(std::move(execution)), m_resourceToken(resourceToken),
         m_expected(std::move(expected)), m_output(std::move(output)),
+        m_outputDamage(std::move(outputDamage)),
         m_frameToken(frameToken) {}
 
   bool needsLiveBlur() override { return false; }
@@ -106,7 +109,7 @@ public:
         logUnexpectedPassFailure(passName(), "execution state is unavailable");
         return {};
       }
-      const auto *resource =
+      auto *resource =
           m_execution->resources.resourceFor(m_resourceToken);
       if (!resource || !(resource->plan() == m_expected)) {
         const Error error{
@@ -119,7 +122,10 @@ public:
         reportCapture(m_execution, m_resourceToken, m_frameToken, error);
         return {};
       }
-      if (auto captured = captureCurrentFramebuffer(*resource, m_output);
+      if (auto captured = captureCurrentFramebuffer(
+              *resource,
+              m_output,
+              m_outputDamage);
           !captured) {
         m_execution->captures.fail(m_resourceToken, m_frameToken);
         logPassFailure(passName(), captured.error());
@@ -165,6 +171,7 @@ private:
   std::uint64_t m_resourceToken = 0;
   CapturePlan m_expected;
   OutputGeneration m_output;
+  std::vector<PixelRect> m_outputDamage;
   std::uint64_t m_frameToken = 0;
 };
 
@@ -216,13 +223,19 @@ public:
         reportDraw(m_execution, m_plan.key, m_frameToken, error);
         return {};
       }
-      if (auto drawn = drawGlass(m_plan, m_plan.resourceToken, *resource,
-                                 m_output, m_execution->shader);
-          !drawn) {
+      auto drawn = drawGlass(
+          m_plan,
+          m_plan.resourceToken,
+          *resource,
+          m_output,
+          m_execution->shader);
+      if (!drawn) {
         logPassFailure(passName(), drawn.error());
         reportDraw(m_execution, m_plan.key, m_frameToken, drawn.error());
         return {};
       }
+      if (!drawn.value())
+        return {};
       reportDraw(m_execution, m_plan.key, m_frameToken, std::nullopt);
     } catch (const std::exception &error) {
       logUnexpectedPassFailure(passName(), error.what());
@@ -264,7 +277,15 @@ currentFrameDamage(const OutputSnapshot &output) {
         "current render output differs from the frame event");
 
   CRegion clipped = g_pHyprRenderer->m_renderData.damage.copy();
-  clipped.intersect(0, 0, output.bufferWidth, output.bufferHeight);
+  auto oriented = outputOrientedPixelSize(output);
+  if (!oriented)
+    return Result<std::vector<PixelRect>>::failure(
+        oriented.error());
+  clipped.intersect(
+      0,
+      0,
+      oriented.value().width,
+      oriented.value().height);
   std::vector<PixelRect> result;
   clipped.forEachRect([&result](const pixman_box32 &rect) {
     const auto width = rect.x2 - rect.x1;
@@ -369,6 +390,7 @@ HyprlandGlassPassCoordinator::enqueue(const RenderHookEvent &event) {
   for (const auto &resource : scheduled.value())
     g_pHyprRenderer->m_renderPass.add(makeUnique<V2CapturePass>(
         m_execution, resource.token, resource.plan, event.output,
+        damage.value(),
         event.frameToken));
   const auto decorationOwned = event.hook == RenderHookStage::PreWindow;
   if (!decorationOwned)

@@ -256,7 +256,9 @@ Result<bool> drawGlass(const GlassDrawPlan &plan, std::uint64_t resourceToken,
 
   bool drew = false;
   damage.forEachRect([&](const auto &rect) {
-    Render::GL::g_pHyprOpenGL->scissor(&rect, false);
+    Render::GL::g_pHyprOpenGL->scissor(
+        &rect,
+        g_pHyprRenderer->m_renderData.transformDamage);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     drew = true;
   });

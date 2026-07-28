@@ -26,6 +26,13 @@ struct PixelRect {
     friend bool operator==(const PixelRect&, const PixelRect&) = default;
 };
 
+struct PixelSize {
+    std::int32_t width = 0;
+    std::int32_t height = 0;
+
+    friend bool operator==(const PixelSize&, const PixelSize&) = default;
+};
+
 struct MappedGeometry {
     Rect                 clippedGlobal;
     Rect                 outputLocal;
@@ -39,5 +46,16 @@ struct MappedGeometry {
 [[nodiscard]] Result<std::optional<MappedGeometry>> mapGlobalLogicalRect(
     const Rect& globalRect,
     const OutputGeneration& output);
+
+[[nodiscard]] Result<PixelSize> outputOrientedPixelSize(
+    const OutputSnapshot& output);
+
+[[nodiscard]] Result<PixelRect> mapOutputPixelRectToBuffer(
+    const PixelRect& rect,
+    const OutputSnapshot& output);
+
+[[nodiscard]] Result<PixelRect> mapBufferPixelRectToOutput(
+    const PixelRect& rect,
+    const OutputSnapshot& output);
 
 } // namespace hfg::v2

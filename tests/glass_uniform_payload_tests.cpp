@@ -44,6 +44,7 @@ GlassDrawPlan plan(Shape shape) {
       .destination = {10.0, 20.0, 100.0, 60.0},
       .destinationPixels = {12.5, 25.0, 125.0, 75.0},
       .damageCoverage = {12, 25, 126, 75},
+      .captureDamageCoverage = {0, 0, 150, 100},
       .sourceCorners =
           {
               TextureCoordinate{0.1, 0.2},

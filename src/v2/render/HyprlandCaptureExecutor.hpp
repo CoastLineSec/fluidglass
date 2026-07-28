@@ -4,10 +4,13 @@
 #include "v2/render/HyprlandCaptureResource.hpp"
 #include "v2/render/OutputGeneration.hpp"
 
+#include <span>
+
 namespace hfg::v2 {
 
 [[nodiscard]] Result<void> captureCurrentFramebuffer(
-    const HyprlandCaptureResource& resource,
-    const OutputGeneration& output);
+    HyprlandCaptureResource& resource,
+    const OutputGeneration& output,
+    std::span<const PixelRect> outputDamage);
 
 } // namespace hfg::v2

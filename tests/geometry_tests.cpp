@@ -153,6 +153,70 @@ int main() {
             };
             require(mapped.value()->semanticCorners == expected, "semantic corner order changed");
         }},
+        Case{"pixel rectangles round trip through every output transform", [] {
+            for (const auto transform : {
+                     OutputTransform::Normal,
+                     OutputTransform::Rotate90,
+                     OutputTransform::Rotate180,
+                     OutputTransform::Rotate270,
+                     OutputTransform::Flipped,
+                     OutputTransform::Flipped90,
+                     OutputTransform::Flipped180,
+                     OutputTransform::Flipped270,
+                 }) {
+                const auto snapshot = output(transform).snapshot;
+                const PixelRect oriented{10, 20, 30, 40};
+                const auto buffer = mapOutputPixelRectToBuffer(
+                    oriented,
+                    snapshot);
+                require(
+                    buffer.hasValue(),
+                    "output-oriented pixel rectangle did not map");
+                const auto roundTrip = mapBufferPixelRectToOutput(
+                    buffer.value(),
+                    snapshot);
+                require(
+                    roundTrip.hasValue() &&
+                        roundTrip.value() == oriented,
+                    "pixel rectangle did not round trip");
+            }
+        }},
+        Case{"transform three maps a portrait top bar to the buffer edge", [] {
+            OutputGeneration generation{
+                .snapshot = {
+                    .name = "HDMI-A-2",
+                    .objectToken = 3,
+                    .modeToken = 7,
+                    .bufferWidth = 1920,
+                    .bufferHeight = 1080,
+                    .logicalX = 0.0,
+                    .logicalY = 1237.0,
+                    .logicalWidth = 1080.0,
+                    .logicalHeight = 1920.0,
+                    .scale = 1.0,
+                    .transform = OutputTransform::Rotate270,
+                    .renderFormat = 0x34325241U,
+                    .colorStateToken = 9,
+                },
+                .generation = 4,
+            };
+            const PixelRect outputBar{0, 0, 1080, 60};
+            const auto buffer = mapOutputPixelRectToBuffer(
+                outputBar,
+                generation.snapshot);
+            require(
+                buffer.hasValue() &&
+                    buffer.value() ==
+                        PixelRect{1860, 0, 60, 1080},
+                "portrait top bar did not map to the buffer edge");
+            const auto restored = mapBufferPixelRectToOutput(
+                buffer.value(),
+                generation.snapshot);
+            require(
+                restored.hasValue() &&
+                    restored.value() == outputBar,
+                "portrait buffer edge did not map back to the top bar");
+        }},
         Case{"fractional clipping stays inside the buffer", [] {
             OutputGeneration generation{
                 .snapshot = OutputSnapshot{

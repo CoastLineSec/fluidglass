@@ -33,12 +33,12 @@ RenderStage renderStage(RenderHookStage hook) {
   return RenderStage::PostWindows;
 }
 
-bool validDamage(const PixelRect &rect, const OutputSnapshot &output) {
+bool validDamage(const PixelRect &rect, const PixelSize &output) {
   if (rect.x < 0 || rect.y < 0 || rect.width <= 0 || rect.height <= 0)
     return false;
   const auto right = static_cast<std::int64_t>(rect.x) + rect.width;
   const auto bottom = static_cast<std::int64_t>(rect.y) + rect.height;
-  return right <= output.bufferWidth && bottom <= output.bufferHeight;
+  return right <= output.width && bottom <= output.height;
 }
 
 bool intersects(const PixelRect &left, const PixelRect &right) {
@@ -66,8 +66,14 @@ Result<GlassFramePlan> planGlassFrame(const GlassRenderScene &scene,
   if ((stage == RenderStage::PreWindow) != (event.stageObjectToken != 0U))
     return failure(ErrorCode::InvalidRequest, "event.stage_object_token",
                    "only pre-window events carry an object token");
+  const auto outputSize =
+      outputOrientedPixelSize(event.output.snapshot);
+  if (!outputSize)
+    return failure(outputSize.error().code,
+                   "event." + outputSize.error().path,
+                   outputSize.error().message);
   for (std::size_t index = 0; index < frameDamage.size(); ++index)
-    if (!validDamage(frameDamage[index], event.output.snapshot))
+    if (!validDamage(frameDamage[index], outputSize.value()))
       return failure(ErrorCode::InvalidRequest,
                      "frame_damage[" + std::to_string(index) + "]",
                      "frame damage lies outside the output buffer");
@@ -104,6 +110,12 @@ Result<GlassFramePlan> planGlassFrame(const GlassRenderScene &scene,
     if (draw.key.stage != stage ||
         draw.capture.key.stageObjectToken != event.stageObjectToken)
       continue;
+    if (!validDamage(draw.damageCoverage, outputSize.value()) ||
+        !validDamage(draw.captureDamageCoverage, outputSize.value()))
+      return failure(
+          ErrorCode::InvalidRequest,
+          "scene.draws[" + std::to_string(index) + "].damage_coverage",
+          "draw damage coverage lies outside the output-oriented pixel space");
 
     const auto resource = resources.find(draw.resourceToken);
     if (resource == resources.end() || !(resource->second == draw.capture))
@@ -113,7 +125,7 @@ Result<GlassFramePlan> planGlassFrame(const GlassRenderScene &scene,
 
     const auto damaged =
         std::ranges::any_of(frameDamage, [&](const PixelRect &rect) {
-          return intersects(rect, draw.capture.region);
+          return intersects(rect, draw.captureDamageCoverage);
         });
     if (!damaged && !draw.transitionActive)
       continue;

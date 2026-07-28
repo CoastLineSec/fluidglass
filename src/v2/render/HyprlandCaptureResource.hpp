@@ -25,7 +25,10 @@ class HyprlandCaptureResource {
     [[nodiscard]] GLuint framebuffer() const noexcept;
     [[nodiscard]] GLuint texture() const noexcept;
     [[nodiscard]] bool allocated() const noexcept;
+    [[nodiscard]] bool initialized() const noexcept;
 
+    void markInitialized() noexcept;
+    void invalidate() noexcept;
     void release() noexcept;
 
   private:
@@ -37,6 +40,7 @@ class HyprlandCaptureResource {
     CapturePlan m_plan;
     GLuint      m_framebuffer = 0;
     GLuint      m_texture = 0;
+    bool        m_initialized = false;
 };
 
 } // namespace hfg::v2

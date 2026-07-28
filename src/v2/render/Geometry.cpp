@@ -22,6 +22,18 @@ Result<std::optional<MappedGeometry>> invalid(
     });
 }
 
+template <typename T>
+Result<T> mappingFailure(
+    std::string path,
+    std::string message,
+    ErrorCode code = ErrorCode::InvalidRequest) {
+    return Result<T>::failure({
+        .code = code,
+        .path = std::move(path),
+        .message = std::move(message),
+    });
+}
+
 bool validCoordinate(double value) {
     return std::isfinite(value) && std::abs(value) <= MAX_LOGICAL_VALUE;
 }
@@ -141,6 +153,29 @@ Point clampPoint(Point point, double width, double height) {
     return point;
 }
 
+bool containedPixelRect(
+    const PixelRect& rect,
+    std::int32_t width,
+    std::int32_t height) {
+    if (rect.x < 0 || rect.y < 0 ||
+        rect.width <= 0 || rect.height <= 0)
+        return false;
+    const auto right =
+        static_cast<std::int64_t>(rect.x) + rect.width;
+    const auto bottom =
+        static_cast<std::int64_t>(rect.y) + rect.height;
+    return right <= width && bottom <= height;
+}
+
+PixelRect exactPixelRect(const Rect& rect) {
+    return {
+        .x = static_cast<std::int32_t>(std::lround(rect.x)),
+        .y = static_cast<std::int32_t>(std::lround(rect.y)),
+        .width = static_cast<std::int32_t>(std::lround(rect.width)),
+        .height = static_cast<std::int32_t>(std::lround(rect.height)),
+    };
+}
+
 } // namespace
 
 Result<std::optional<MappedGeometry>> mapGlobalLogicalRect(
@@ -249,6 +284,92 @@ Result<std::optional<MappedGeometry>> mapGlobalLogicalRect(
         },
         .semanticCorners = corners,
     });
+}
+
+Result<PixelSize> outputOrientedPixelSize(
+    const OutputSnapshot& output) {
+    if (auto validation = validateOutputSnapshot(output); !validation)
+        return Result<PixelSize>::failure(validation.error());
+    return Result<PixelSize>::success({
+        .width = static_cast<std::int32_t>(
+            swapsAxes(output.transform)
+                ? output.bufferHeight
+                : output.bufferWidth),
+        .height = static_cast<std::int32_t>(
+            swapsAxes(output.transform)
+                ? output.bufferWidth
+                : output.bufferHeight),
+    });
+}
+
+Result<PixelRect> mapOutputPixelRectToBuffer(
+    const PixelRect& rect,
+    const OutputSnapshot& output) {
+    auto oriented = outputOrientedPixelSize(output);
+    if (!oriented)
+        return Result<PixelRect>::failure(oriented.error());
+    if (!containedPixelRect(
+            rect,
+            oriented.value().width,
+            oriented.value().height))
+        return mappingFailure<PixelRect>(
+            "rect",
+            "output-oriented pixel rectangle lies outside the output");
+
+    const auto mapped = exactPixelRect(transformRect(
+        Rect{
+            .x = static_cast<double>(rect.x),
+            .y = static_cast<double>(rect.y),
+            .width = static_cast<double>(rect.width),
+            .height = static_cast<double>(rect.height),
+        },
+        inverseTransform(output.transform),
+        static_cast<double>(oriented.value().width),
+        static_cast<double>(oriented.value().height)));
+    if (!containedPixelRect(
+            mapped,
+            static_cast<std::int32_t>(output.bufferWidth),
+            static_cast<std::int32_t>(output.bufferHeight)))
+        return mappingFailure<PixelRect>(
+            "rect",
+            "mapped buffer pixel rectangle lies outside the output",
+            ErrorCode::InternalError);
+    return Result<PixelRect>::success(mapped);
+}
+
+Result<PixelRect> mapBufferPixelRectToOutput(
+    const PixelRect& rect,
+    const OutputSnapshot& output) {
+    auto oriented = outputOrientedPixelSize(output);
+    if (!oriented)
+        return Result<PixelRect>::failure(oriented.error());
+    if (!containedPixelRect(
+            rect,
+            static_cast<std::int32_t>(output.bufferWidth),
+            static_cast<std::int32_t>(output.bufferHeight)))
+        return mappingFailure<PixelRect>(
+            "rect",
+            "buffer pixel rectangle lies outside the output");
+
+    const auto mapped = exactPixelRect(transformRect(
+        Rect{
+            .x = static_cast<double>(rect.x),
+            .y = static_cast<double>(rect.y),
+            .width = static_cast<double>(rect.width),
+            .height = static_cast<double>(rect.height),
+        },
+        output.transform,
+        static_cast<double>(output.bufferWidth),
+        static_cast<double>(output.bufferHeight)));
+    if (!containedPixelRect(
+            mapped,
+            oriented.value().width,
+            oriented.value().height))
+        return mappingFailure<PixelRect>(
+            "rect",
+            "mapped output-oriented pixel rectangle lies outside the output",
+            ErrorCode::InternalError);
+    return Result<PixelRect>::success(mapped);
 }
 
 } // namespace hfg::v2

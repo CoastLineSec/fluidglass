@@ -113,12 +113,96 @@ int main() {
             auto differentColor = requests.front();
             differentColor.output = output(1, AR24, 8);
             requests.push_back(differentColor);
+            auto differentConnector = requests.front();
+            differentConnector.output.snapshot.name = "DP-2";
+            differentConnector.output.snapshot.objectToken = 2;
+            requests.push_back(differentConnector);
 
             const auto result = planCaptures(requests, limits());
-            require(result.hasValue() && result.value().size() == 5U, "incompatible captures were reused");
+            require(result.hasValue() && result.value().size() == 6U, "incompatible captures were reused");
             require(result.value()[0].key.renderFormat == AR24, "source format was replaced");
             require(result.value()[3].key.renderFormat == AB30, "wide format was replaced");
             require(result.value()[4].key.colorStateToken == 8U, "color state was discarded");
+            require(result.value()[5].key.output == "DP-2",
+                    "different output reused another connector's capture");
+        }},
+        Case{"physical multi-output topology receives independent captures", [] {
+            auto dp2 = output();
+            dp2.snapshot.name = "DP-2";
+            dp2.snapshot.objectToken = 2;
+            dp2.snapshot.bufferWidth = 3440;
+            dp2.snapshot.bufferHeight = 1440;
+            dp2.snapshot.logicalX = 1080.0;
+            dp2.snapshot.logicalY = 1440.0;
+            dp2.snapshot.logicalWidth = 3440.0;
+            dp2.snapshot.logicalHeight = 1440.0;
+
+            auto dp4 = output();
+            dp4.snapshot.name = "DP-4";
+            dp4.snapshot.objectToken = 4;
+            dp4.snapshot.bufferWidth = 2560;
+            dp4.snapshot.bufferHeight = 1440;
+            dp4.snapshot.logicalX = 1550.0;
+            dp4.snapshot.logicalWidth = 2560.0;
+            dp4.snapshot.logicalHeight = 1440.0;
+
+            auto portrait = output();
+            portrait.snapshot.name = "HDMI-A-2";
+            portrait.snapshot.objectToken = 6;
+            portrait.snapshot.bufferWidth = 1920;
+            portrait.snapshot.bufferHeight = 1080;
+            portrait.snapshot.logicalY = 1237.0;
+            portrait.snapshot.logicalWidth = 1080.0;
+            portrait.snapshot.logicalHeight = 1920.0;
+            portrait.snapshot.transform =
+                OutputTransform::Rotate270;
+
+            const std::array requests{
+                CaptureRequest{
+                    .output = dp2,
+                    .stage = RenderStage::PostWindows,
+                    .coverage = {0, 0, 3440, 60},
+                    .apronPixels = 80,
+                    .bytesPerPixel = 4,
+                },
+                CaptureRequest{
+                    .output = dp4,
+                    .stage = RenderStage::PostWindows,
+                    .coverage = {0, 0, 2560, 60},
+                    .apronPixels = 80,
+                    .bytesPerPixel = 4,
+                },
+                CaptureRequest{
+                    .output = portrait,
+                    .stage = RenderStage::PostWindows,
+                    .coverage = {1860, 0, 60, 1080},
+                    .apronPixels = 80,
+                    .bytesPerPixel = 4,
+                },
+            };
+            const auto result = planCaptures(
+                requests,
+                limits(4096, 4096, 4096U * 4096U,
+                       4096U * 4096U * 16U));
+            require(
+                result.hasValue() &&
+                    result.value().size() == 3U,
+                "physical outputs shared or lost a capture");
+            require(
+                result.value()[0].key.output == "DP-2" &&
+                    result.value()[0].region ==
+                        PixelRect{0, 0, 3440, 140},
+                "ultrawide capture plan changed");
+            require(
+                result.value()[1].key.output == "DP-4" &&
+                    result.value()[1].region ==
+                        PixelRect{0, 0, 2560, 140},
+                "landscape capture plan changed");
+            require(
+                result.value()[2].key.output == "HDMI-A-2" &&
+                    result.value()[2].region ==
+                        PixelRect{1780, 0, 140, 1080},
+                "portrait capture plan changed");
         }},
         Case{"pre-window captures are scoped to an exact window", [] {
             auto first = request(PixelRect{10, 10, 20, 20});

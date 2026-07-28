@@ -181,6 +181,21 @@ HyprlandCaptureResourceManager::resourceFor(
     return entry->resource.get();
 }
 
+HyprlandCaptureResource*
+HyprlandCaptureResourceManager::resourceFor(
+    std::uint64_t token) noexcept {
+    const auto entry = std::ranges::find_if(
+        m_entries,
+        [&](const Entry& candidate) {
+            return candidate.token == token &&
+                candidate.resource &&
+                candidate.resource->allocated();
+        });
+    if (entry == m_entries.end())
+        return nullptr;
+    return entry->resource.get();
+}
+
 Result<std::uint64_t>
 HyprlandCaptureResourceManager::nextToken() {
     if (m_lastToken ==

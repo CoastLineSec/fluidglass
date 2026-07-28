@@ -2,6 +2,8 @@
 
 #include "v2/render/CaptureBlit.hpp"
 
+#include <array>
+
 using hfg::test::Case;
 using hfg::test::require;
 using namespace hfg::v2;
@@ -91,6 +93,96 @@ int main() {
                 result.value().source == BlitRect{20, 1620, 60, 1820},
                 "rotated framebuffer coverage was transformed twice");
         }},
+        Case{"uninitialized captures receive one complete baseline", [] {
+            const auto result = captureUpdateBlits(
+                plan(PixelRect{
+                    .x = 100,
+                    .y = 200,
+                    .width = 300,
+                    .height = 150,
+                }),
+                output(),
+                std::array{
+                    PixelRect{.x = 120, .y = 220, .width = 10, .height = 20},
+                },
+                false);
+            require(
+                result.hasValue() &&
+                    result.value() ==
+                        std::vector{
+                            CaptureBlit{
+                                .source = {100, 730, 400, 880},
+                                .destination = {0, 0, 300, 150},
+                            },
+                        },
+                "new capture did not receive a complete baseline");
+        }},
+        Case{"initialized captures update only fresh damaged pixels", [] {
+            const auto result = captureUpdateBlits(
+                plan(PixelRect{
+                    .x = 100,
+                    .y = 200,
+                    .width = 300,
+                    .height = 150,
+                }),
+                output(),
+                std::array{
+                    PixelRect{.x = 120, .y = 220, .width = 10, .height = 20},
+                    PixelRect{.x = 700, .y = 500, .width = 20, .height = 20},
+                },
+                true);
+            require(
+                result.hasValue() &&
+                    result.value() ==
+                        std::vector{
+                            CaptureBlit{
+                                .source = {120, 840, 130, 860},
+                                .destination = {20, 110, 30, 130},
+                            },
+                        },
+                "partial capture overwrote retained undamaged pixels");
+        }},
+        Case{"transform three damage maps into its bounded capture", [] {
+            auto rotated = output();
+            rotated.snapshot.bufferWidth = 1920;
+            rotated.snapshot.bufferHeight = 1080;
+            rotated.snapshot.logicalWidth = 1080.0;
+            rotated.snapshot.logicalHeight = 1920.0;
+            rotated.snapshot.transform = OutputTransform::Rotate270;
+            auto rotatedPlan = plan(PixelRect{
+                .x = 1800,
+                .y = 0,
+                .width = 120,
+                .height = 1080,
+            });
+            const auto result = captureUpdateBlits(
+                rotatedPlan,
+                rotated,
+                std::array{
+                    PixelRect{.x = 100, .y = 10, .width = 200, .height = 20},
+                },
+                true);
+            require(
+                result.hasValue() &&
+                    result.value() ==
+                        std::vector{
+                            CaptureBlit{
+                                .source = {1890, 780, 1910, 980},
+                                .destination = {90, 780, 110, 980},
+                            },
+                        },
+                "transform-three damage used the wrong coordinate space");
+        }},
+        Case{"initialized captures preserve clean pixels without damage", [] {
+            const auto result = captureUpdateBlits(
+                plan(PixelRect{100, 200, 300, 150}),
+                output(),
+                {},
+                true);
+            require(
+                result.hasValue() && result.value().empty(),
+                "damage-free frame recopied stale compositor contents");
+        }},
         Case{"stale output identity fails closed", [] {
             auto stale = output();
             stale.generation = 5;
@@ -111,6 +203,20 @@ int main() {
             auto malformed = plan(PixelRect{0, 0, 10, 10});
             malformed.byteCount = 1;
             require(!captureBlitFor(malformed, output()), "malformed plan was accepted");
+        }},
+        Case{"malformed output damage fails closed", [] {
+            const auto result = captureUpdateBlits(
+                plan(PixelRect{100, 200, 300, 150}),
+                output(),
+                std::array{
+                    PixelRect{-1, 0, 10, 10},
+                },
+                true);
+            require(
+                !result &&
+                    result.error().path ==
+                        "output_damage[0].rect",
+                "invalid output damage reached a capture update");
         }},
     });
 }

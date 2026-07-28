@@ -49,6 +49,7 @@ GlassDrawPlan draw(std::uint64_t token = 7,
       .destination = {100.0, 80.0, 240.0, 120.0},
       .destinationPixels = {100.0, 80.0, 240.0, 120.0},
       .damageCoverage = {100, 80, 240, 120},
+      .captureDamageCoverage = {80, 60, 300, 180},
       .sourceCorners = {},
       .fullSizePixels = {240.0, 120.0},
       .clipOffsetPixels = {},
@@ -166,6 +167,43 @@ int main() {
                              },
                      "transition did not sustain its output-global damage");
            }},
+      Case{"transformed output damage selects buffer-mapped capture",
+           [] {
+             auto selected = draw();
+             selected.capture.region = {1800, 0, 120, 1080};
+             selected.capture.pixelCount = 129600;
+             selected.capture.byteCount = 518400;
+             selected.damageCoverage = {0, 8, 1080, 60};
+             selected.captureDamageCoverage = {0, 0, 1080, 120};
+             auto rotatedScene = scene(selected);
+             rotatedScene.resources.front().plan =
+                 selected.capture;
+             auto rotatedEvent = event();
+             rotatedEvent.output.snapshot.bufferWidth = 1920;
+             rotatedEvent.output.snapshot.bufferHeight = 1080;
+             rotatedEvent.output.snapshot.logicalWidth = 1080.0;
+             rotatedEvent.output.snapshot.logicalHeight = 1920.0;
+             rotatedEvent.output.snapshot.transform =
+                 OutputTransform::Rotate270;
+             const auto result = planGlassFrame(
+                 rotatedScene,
+                 rotatedEvent,
+                 std::array{
+                     PixelRect{.x = 200, .y = 20, .width = 50, .height = 20},
+                     PixelRect{.x = 400, .y = 1500, .width = 20, .height = 20},
+                 });
+             require(
+                 result.hasValue() &&
+                     result.value().drawIndices ==
+                         std::vector<std::size_t>{0} &&
+                     result.value().captureTokens ==
+                         std::vector<std::uint64_t>{7} &&
+                     result.value().renderDamage ==
+                         std::vector{
+                             PixelRect{0, 8, 1080, 60},
+                         },
+                 "transform-three frame compared output damage with buffer coordinates");
+           }},
       Case{"pre-window identity selects only its exact object",
            [] {
              const auto selected = draw(8, RenderStage::PreWindow, 55);
@@ -262,6 +300,13 @@ int main() {
                                          PixelRect{-1, 0, 10, 10},
                                      }),
                      "out-of-output damage reached a frame");
+             auto malformedDraw = scene();
+             malformedDraw.draws.front().captureDamageCoverage.height = 601;
+             require(!planGlassFrame(
+                         malformedDraw,
+                         event(),
+                         std::array{PixelRect{0, 0, 10, 10}}),
+                     "out-of-output draw coverage reached a frame");
            }},
       Case{"draw and capture identity mismatch fails closed",
            [] {

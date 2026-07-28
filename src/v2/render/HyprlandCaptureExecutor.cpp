@@ -29,16 +29,25 @@ Result<void> failure(
 } // namespace
 
 Result<void> captureCurrentFramebuffer(
-    const HyprlandCaptureResource& resource,
-    const OutputGeneration& output) {
+    HyprlandCaptureResource& resource,
+    const OutputGeneration& output,
+    std::span<const PixelRect> outputDamage) {
     if (!resource.allocated())
         return failure(
             ErrorCode::InvalidRequest,
             "resource",
             "capture resource is not allocated");
-    const auto blit = captureBlitFor(resource.plan(), output);
-    if (!blit)
-        return Result<void>::failure(blit.error());
+    const auto blits = captureUpdateBlits(
+        resource.plan(),
+        output,
+        outputDamage,
+        resource.initialized());
+    if (!blits) {
+        resource.invalidate();
+        return Result<void>::failure(blits.error());
+    }
+    if (blits.value().empty())
+        return Result<void>::success();
     if (!g_pHyprRenderer || !Render::GL::g_pHyprOpenGL)
         return failure(
             ErrorCode::UnsupportedOperation,
@@ -101,37 +110,48 @@ Result<void> captureCurrentFramebuffer(
     GLenum blitError = GL_NO_ERROR;
     if (readStatus == GL_FRAMEBUFFER_COMPLETE &&
         drawStatus == GL_FRAMEBUFFER_COMPLETE) {
-        glBlitFramebuffer(
-            blit.value().source.x0,
-            blit.value().source.y0,
-            blit.value().source.x1,
-            blit.value().source.y1,
-            blit.value().destination.x0,
-            blit.value().destination.y0,
-            blit.value().destination.x1,
-            blit.value().destination.y1,
-            GL_COLOR_BUFFER_BIT,
-            GL_NEAREST);
-        blitError = glGetError();
+        for (const auto& blit : blits.value()) {
+            glBlitFramebuffer(
+                blit.source.x0,
+                blit.source.y0,
+                blit.source.x1,
+                blit.source.y1,
+                blit.destination.x0,
+                blit.destination.y0,
+                blit.destination.x1,
+                blit.destination.y1,
+                GL_COLOR_BUFFER_BIT,
+                GL_NEAREST);
+            blitError = glGetError();
+            if (blitError != GL_NO_ERROR)
+                break;
+        }
     }
 
     if (auto restored = state.value()->restore(); !restored)
         return restored;
-    if (readStatus != GL_FRAMEBUFFER_COMPLETE)
+    if (readStatus != GL_FRAMEBUFFER_COMPLETE) {
+        resource.invalidate();
         return failure(
             ErrorCode::InternalError,
             "renderer.source_framebuffer",
             "source framebuffer is incomplete");
-    if (drawStatus != GL_FRAMEBUFFER_COMPLETE)
+    }
+    if (drawStatus != GL_FRAMEBUFFER_COMPLETE) {
+        resource.invalidate();
         return failure(
             ErrorCode::InternalError,
             "resource.framebuffer",
             "capture framebuffer became incomplete");
-    if (blitError != GL_NO_ERROR)
+    }
+    if (blitError != GL_NO_ERROR) {
+        resource.invalidate();
         return failure(
             ErrorCode::InternalError,
             "renderer.blit",
             "OpenGL rejected the bounded capture copy");
+    }
+    resource.markInitialized();
     return Result<void>::success();
 }
 

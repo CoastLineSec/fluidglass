@@ -54,6 +54,8 @@ class HyprlandCaptureResourceManager {
     resources() const;
     [[nodiscard]] const HyprlandCaptureResource*
     resourceFor(std::uint64_t token) const noexcept;
+    [[nodiscard]] HyprlandCaptureResource*
+    resourceFor(std::uint64_t token) noexcept;
 
   private:
     struct Entry {
