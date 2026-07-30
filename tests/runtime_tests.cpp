@@ -179,8 +179,14 @@ int main() {
                               ["retain_until_drawn"] == true &&
                         result["result"]["presentation_handoffs"]
                               ["target_kinds"] == json::array({"layer"}) &&
+                        result["result"]["presentation_handoffs"]
+                              ["geometry_morph"]["layer_targets"] == true &&
+                        result["result"]["presentation_handoffs"]
+                              ["geometry_morph"]["reversal"] == true &&
                         result["result"]["limits"]
-                              ["presentation_handoff_ms"] == 2000,
+                              ["presentation_handoff_ms"] == 2000 &&
+                        result["result"]["limits"]
+                              ["presentation_morph_ms"] == 1000,
                     "presentation handoff capability is incomplete");
         }},
         Case{"capabilities and status report the live renderer truthfully", [] {

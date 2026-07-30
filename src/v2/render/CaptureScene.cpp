@@ -123,8 +123,9 @@ Result<CaptureScene> buildCaptureScene(
         CaptureRequest request{
             .output = presentation.output,
             .stage = presentation.presentation.key.stage,
-            .coverage =
-                presentation.presentation.geometry.coverage,
+            .coverage = presentation.transitionEnvelope
+                ? presentation.transitionEnvelope->coverage
+                : presentation.presentation.geometry.coverage,
             .apronPixels =
                 presentation.sampling.apronPixels,
             .bytesPerPixel = *formatSize,

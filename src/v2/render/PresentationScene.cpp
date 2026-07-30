@@ -34,6 +34,55 @@ const OutputGeneration* findOutput(
     return nullptr;
 }
 
+Result<ResolvedTarget> applyPresentationMorph(
+    ResolvedTarget target,
+    const PresentationHandoffTracker* handoffs,
+    std::uint64_t nowMs) {
+    if (!handoffs)
+        return Result<ResolvedTarget>::success(std::move(target));
+    const auto record = handoffs->target(target.attachment.identity);
+    if (!record || !record->morph ||
+        record->morph->state != PresentationMorphState::Active)
+        return Result<ResolvedTarget>::success(std::move(target));
+    if (target.attachment.kind != TargetKind::Layer ||
+        !target.definition.geometry ||
+        !std::holds_alternative<RoundedRectShape>(
+            target.definition.shape))
+        return Result<ResolvedTarget>::failure({
+            .code = ErrorCode::UnsupportedTarget,
+            .path = "presentation.morph",
+            .message = "active morph no longer references a rounded layer target",
+        });
+    auto resolved = resolvePresentationMorph(*record->morph, nowMs);
+    if (!resolved)
+        return Result<ResolvedTarget>::failure(resolved.error());
+    const auto destination = *target.definition.geometry;
+    const auto originX =
+        target.attachment.globalGeometry.x - destination.x;
+    const auto originY =
+        target.attachment.globalGeometry.y - destination.y;
+    const auto global = [originX, originY](const Rect& rect) {
+        return Rect{
+            .x = originX + rect.x,
+            .y = originY + rect.y,
+            .width = rect.width,
+            .height = rect.height,
+        };
+    };
+    target.definition.geometry = resolved.value().current.rect;
+    target.definition.shape = RoundedRectShape{
+        .radius = resolved.value().current.radius,
+    };
+    target.attachment.globalGeometry =
+        global(resolved.value().current.rect);
+    target.transitionEnvelopeGlobal =
+        global(resolved.value().envelope);
+    target.transitionAnchorMs = record->morph->anchorMs;
+    target.transitionActive =
+        target.transitionActive || resolved.value().active;
+    return Result<ResolvedTarget>::success(std::move(target));
+}
+
 } // namespace
 
 Result<PresentationScene>
@@ -42,7 +91,8 @@ buildPresentationScene(
     const ConfigSnapshot* config,
     std::span<const SessionSnapshot> sessions,
     std::span<const OutputGeneration> outputs,
-    std::uint64_t nowMs) {
+    std::uint64_t nowMs,
+    const PresentationHandoffTracker* handoffs) {
     if (targets.effective.size() >
         Limits::MAX_COMPOSITOR_OBJECTS)
         return failure(
@@ -111,6 +161,17 @@ buildPresentationScene(
             });
             continue;
         }
+        movingTarget = applyPresentationMorph(
+            std::move(movingTarget.value()),
+            handoffs,
+            nowMs);
+        if (!movingTarget) {
+            scene.failures.push_back({
+                .identity = identity,
+                .error = movingTarget.error(),
+            });
+            continue;
+        }
         auto material = resolveTargetMaterial(
             movingTarget.value(),
             config,
@@ -163,12 +224,33 @@ buildPresentationScene(
                 planningFailure = sampling.error();
                 break;
             }
+            std::optional<MappedGeometry> transitionEnvelope;
+            if (movingTarget.value().transitionEnvelopeGlobal) {
+                auto mappedEnvelope = mapGlobalLogicalRect(
+                    *movingTarget.value().transitionEnvelopeGlobal,
+                    *output);
+                if (!mappedEnvelope) {
+                    planningFailure = mappedEnvelope.error();
+                    break;
+                }
+                if (!mappedEnvelope.value()) {
+                    planningFailure = Error{
+                        .code = ErrorCode::UnresolvedTarget,
+                        .path = "presentation.morph.envelope",
+                        .message = "morph envelope does not intersect its output",
+                    };
+                    break;
+                }
+                transitionEnvelope =
+                    std::move(*mappedEnvelope.value());
+            }
             planned.push_back({
                 .target = movingTarget.value(),
                 .material = material.value(),
                 .presentation = std::move(presentation),
                 .output = *output,
                 .sampling = std::move(sampling.value()),
+                .transitionEnvelope = std::move(transitionEnvelope),
                 .motionTimeMs = nowMs,
             });
         }

@@ -179,6 +179,74 @@ int main() {
             require(planned.sampling.apronPixels > 0U,
                     "material sampling footprint was omitted");
         }},
+        Case{"active handoff morph drives geometry with a stable envelope", [] {
+            const std::array sessions{session()};
+            const std::array outputs{output("DP-1", 0.0, 1)};
+            auto moving = target(
+                "client:demo:s1",
+                "bar",
+                MaterialSource::Session,
+                "local",
+                Rect{0.0, 0.0, 100.0, 44.0});
+            moving.definition.kind = TargetKind::Layer;
+            moving.definition.selector =
+                LayerSelector{.namespaceName = "hgs:bar:DP-1"};
+            moving.definition.shape = RoundedRectShape{.radius = 0.0};
+            moving.attachment.kind = TargetKind::Layer;
+            moving.attachment.stage = RenderStage::PostLayer;
+            moving.definition.stage = RenderStage::PostLayer;
+            TargetScene targets{
+                .effective = {moving},
+                .inactive = {},
+                .suppressed = {},
+                .failures = {},
+            };
+            PresentationHandoffTracker tracker;
+            const PreparedPresentationHandoff prepared{
+                .identity = moving.attachment.identity,
+                .sourceGeneration = 1,
+                .timeoutMs = 500,
+                .presentations = {},
+                .morph = PreparedPresentationMorph{
+                    .transitionId = "attach-1",
+                    .source = {
+                        .rect = {12.0, 8.0, 76.0, 44.0},
+                        .radius = 18.0,
+                    },
+                    .destination = {
+                        .rect = {0.0, 0.0, 100.0, 44.0},
+                        .radius = 0.0,
+                    },
+                    .durationMs = 240,
+                },
+            };
+            tracker.commit(
+                moving.attachment.identity.owner,
+                2,
+                std::array{prepared},
+                1'000);
+            const auto result = buildPresentationScene(
+                targets,
+                nullptr,
+                sessions,
+                outputs,
+                1'120,
+                &tracker);
+            require(result && result.value().presentations.size() == 1U,
+                    "active morph did not produce a presentation");
+            const auto& planned = result.value().presentations.front();
+            const auto* shape = std::get_if<RoundedRectShape>(
+                &planned.target.definition.shape);
+            require(planned.target.transitionActive &&
+                        planned.transitionEnvelope &&
+                        planned.transitionEnvelope->outputLocal ==
+                            Rect{0.0, 0.0, 100.0, 52.0} &&
+                        planned.target.attachment.globalGeometry.x > 0.0 &&
+                        planned.target.attachment.globalGeometry.x < 12.0 &&
+                        shape && shape->radius > 0.0 &&
+                        shape->radius < 18.0,
+                    "morph scene did not preserve envelope or interpolate intent");
+        }},
         Case{"missing material fails only its target", [] {
             const auto active = config();
             const std::array outputs{

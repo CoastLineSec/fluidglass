@@ -149,12 +149,16 @@ Result<GlassFramePlan> planGlassFrame(const GlassRenderScene &scene,
     if (selectedCaptures.insert(draw.resourceToken).second)
       result.captureTokens.push_back(draw.resourceToken);
     if (draw.transitionActive)
-      result.continuationDamage.push_back({
-          .x = event.output.snapshot.logicalX + draw.destination.x,
-          .y = event.output.snapshot.logicalY + draw.destination.y,
-          .width = draw.destination.width,
-          .height = draw.destination.height,
-      });
+      result.continuationDamage.push_back(
+          draw.continuationDamage.width > 0.0 &&
+                  draw.continuationDamage.height > 0.0
+              ? draw.continuationDamage
+              : Rect{
+                    .x = event.output.snapshot.logicalX + draw.destination.x,
+                    .y = event.output.snapshot.logicalY + draw.destination.y,
+                    .width = draw.destination.width,
+                    .height = draw.destination.height,
+                });
     if (handoff != handoffs.end()) {
       const auto fallback = std::ranges::find_if(
           scene.draws,

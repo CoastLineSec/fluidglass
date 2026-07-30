@@ -279,6 +279,16 @@ json capabilitiesJson(const RendererRuntimeStatus& renderer) {
         {"presentation_handoffs", {
             {"retain_until_drawn", true},
             {"target_kinds", json::array({"layer"})},
+            {"geometry_morph", {
+                {"layer_targets", true},
+                {"coordinate_space", "surface-local"},
+                {"shapes", json::array({"rounded-rect-uniform-radius"})},
+                {"easings", json::array({"ease-out-cubic"})},
+                {"anchor", "compositor-monotonic"},
+                {"reversal", true},
+                {"max_active_per_target", 1},
+                {"max_active", Limits::MAX_DYNAMIC_TARGETS},
+            }},
         }},
         {"render_stages", json::array({"post-wallpaper", "pre-window", "post-windows", "post-layer"})},
         {"operations", json::array({
@@ -304,6 +314,7 @@ json capabilitiesJson(const RendererRuntimeStatus& renderer) {
             {"bezier_segments", Limits::MAX_BEZIER_SEGMENTS},
             {"transition_ms", Limits::MAX_TRANSITION_MS},
             {"presentation_handoff_ms", Limits::MAX_PRESENTATION_HANDOFF_MS},
+            {"presentation_morph_ms", Limits::MAX_PRESENTATION_MORPH_MS},
         }},
     };
 }
@@ -317,6 +328,7 @@ json statusJson(
     json sessionList = json::array();
     std::map<std::string_view, std::size_t> readinessTotals;
     std::map<std::string_view, std::size_t> handoffTotals;
+    std::map<std::string_view, std::size_t> morphTotals;
     for (const auto& snapshot : sessions.snapshots()) {
         sessionList.push_back({
             {"owner", snapshot.owner},
@@ -334,10 +346,14 @@ json statusJson(
                 static_cast<void>(key);
                 ++readinessTotals[readinessStateName(record.state)];
             }
-            if (const auto handoff = handoffs.target(identity))
+            if (const auto handoff = handoffs.target(identity)) {
                 for (const auto& presentation : handoff->presentations)
                     ++handoffTotals[
                         presentationHandoffStateName(presentation.state)];
+                if (handoff->morph)
+                    ++morphTotals[
+                        presentationMorphStateName(handoff->morph->state)];
+            }
         }
     }
 
@@ -347,6 +363,9 @@ json statusJson(
     json handoffJson = json::object();
     for (const auto& [state, count] : handoffTotals)
         handoffJson[std::string(state)] = count;
+    json morphJson = json::object();
+    for (const auto& [state, count] : morphTotals)
+        morphJson[std::string(state)] = count;
 
     const auto* active = config.active();
     json reloadError = nullptr;
@@ -384,6 +403,7 @@ json statusJson(
         }},
         {"readiness", std::move(readinessJson)},
         {"presentation_handoffs", std::move(handoffJson)},
+        {"presentation_morphs", std::move(morphJson)},
     };
 }
 
@@ -420,6 +440,30 @@ json handoffJson(const PresentationHandoffRecord& handoff) {
         : failed
             ? PresentationHandoffState::Failed
             : PresentationHandoffState::Completed;
+    json morph = nullptr;
+    if (handoff.morph) {
+        const auto endpointJson = [](const PresentationMorphEndpoint& endpoint) {
+            return json{
+                {"rect", {
+                    {"x", endpoint.rect.x},
+                    {"y", endpoint.rect.y},
+                    {"width", endpoint.rect.width},
+                    {"height", endpoint.rect.height},
+                }},
+                {"radius", endpoint.radius},
+            };
+        };
+        morph = {
+            {"transition_id", handoff.morph->transitionId},
+            {"state", presentationMorphStateName(handoff.morph->state)},
+            {"anchor_ms", handoff.morph->anchorMs},
+            {"duration_ms", handoff.morph->durationMs},
+            {"easing", "ease-out-cubic"},
+            {"source", endpointJson(handoff.morph->source)},
+            {"destination", endpointJson(handoff.morph->destination)},
+            {"detail", handoff.morph->detail},
+        };
+    }
     return {
         {"target_id", handoff.identity.targetId},
         {"source_generation", handoff.sourceGeneration},
@@ -427,6 +471,7 @@ json handoffJson(const PresentationHandoffRecord& handoff) {
         {"expires_at_ms", handoff.expiresAtMs},
         {"state", presentationHandoffStateName(state)},
         {"presentations", std::move(presentations)},
+        {"morph", std::move(morph)},
     };
 }
 
@@ -499,7 +544,8 @@ Result<json> dispatchRequest(
                 auto preparation = handoffs.prepare(
                     *previous,
                     body.replacement,
-                    readiness);
+                    readiness,
+                    nowMs);
                 if (!preparation)
                     return Result<json>::failure(preparation.error());
                 prepared = std::move(preparation.value());

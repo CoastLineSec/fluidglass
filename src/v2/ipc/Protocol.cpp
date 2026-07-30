@@ -928,7 +928,8 @@ Result<Request> parseDocument(const json& document) {
                         "handoff must be an object");
                 if (auto error = rejectUnknown(
                         value,
-                        {"target_id", "source_generation", "mode", "timeout_ms"},
+                        {"target_id", "source_generation", "mode", "timeout_ms",
+                         "morph"},
                         path))
                     return Result<Request>::failure(std::move(*error));
                 const auto targetId = requiredString(
@@ -960,10 +961,60 @@ Result<Request> parseDocument(const json& document) {
                         ErrorCode::UnsupportedOperation,
                         path + ".mode",
                         "handoff mode must be retain-until-drawn");
+                std::optional<PresentationHandoffRequest::Morph> morph;
+                if (const auto found = value.find("morph");
+                    found != value.end()) {
+                    if (!found->is_object())
+                        return invalid<Request>(
+                            ErrorCode::InvalidRequest,
+                            path + ".morph",
+                            "handoff morph must be an object");
+                    if (auto error = rejectUnknown(
+                            *found,
+                            {"transition_id", "duration_ms", "easing",
+                             "anchor"},
+                            path + ".morph"))
+                        return Result<Request>::failure(std::move(*error));
+                    const auto transitionId = requiredString(
+                        *found, "transition_id",
+                        path + ".morph.transition_id");
+                    const auto duration = requiredUnsigned(
+                        *found, "duration_ms",
+                        path + ".morph.duration_ms");
+                    const auto easing = requiredString(
+                        *found, "easing",
+                        path + ".morph.easing");
+                    const auto anchor = requiredString(
+                        *found, "anchor",
+                        path + ".morph.anchor");
+                    if (!transitionId)
+                        return Result<Request>::failure(transitionId.error());
+                    if (!duration)
+                        return Result<Request>::failure(duration.error());
+                    if (!easing)
+                        return Result<Request>::failure(easing.error());
+                    if (!anchor)
+                        return Result<Request>::failure(anchor.error());
+                    if (easing.value() != "ease-out-cubic")
+                        return invalid<Request>(
+                            ErrorCode::UnsupportedOperation,
+                            path + ".morph.easing",
+                            "handoff morph easing is unsupported");
+                    if (anchor.value() != "compositor-monotonic")
+                        return invalid<Request>(
+                            ErrorCode::UnsupportedOperation,
+                            path + ".morph.anchor",
+                            "handoff morph anchor is unsupported");
+                    morph = PresentationHandoffRequest::Morph{
+                        .transitionId = transitionId.value(),
+                        .durationMs = duration.value(),
+                    };
+                }
                 replacement.handoffs.push_back({
                     .targetId = targetId.value(),
                     .sourceGeneration = sourceGeneration.value(),
                     .timeoutMs = timeoutMs.value(),
+                    .morph = std::move(morph),
                 });
             }
         }

@@ -372,7 +372,9 @@ Result<void> validateAssignment(
     const CaptureRequest request{
         .output = output,
         .stage = presentation.key.stage,
-        .coverage = presentation.geometry.coverage,
+        .coverage = planned.transitionEnvelope
+            ? planned.transitionEnvelope->coverage
+            : presentation.geometry.coverage,
         .apronPixels = planned.sampling.apronPixels,
         .bytesPerPixel =
             assignment.required.bytesPerPixel,
@@ -552,8 +554,12 @@ buildGlassDrawPlan(
         resource.plan);
     if (!corners)
         return Result<GlassDrawPlan>::failure(corners.error());
+    const auto& damageGeometry =
+        assignment.presentation.transitionEnvelope
+        ? *assignment.presentation.transitionEnvelope
+        : assignment.presentation.presentation.geometry;
     auto damageCoverage = mapBufferPixelRectToOutput(
-        assignment.presentation.presentation.geometry.coverage,
+        damageGeometry.coverage,
         output);
     if (!damageCoverage)
         return Result<GlassDrawPlan>::failure({
@@ -598,6 +604,8 @@ buildGlassDrawPlan(
         .damageCoverage = damageCoverage.value(),
         .captureDamageCoverage =
             captureDamageCoverage.value(),
+        .continuationDamage =
+            planned.target.transitionEnvelopeGlobal.value_or(full),
         .sourceCorners = std::move(corners.value()),
         .fullSizePixels = {
             .width = full.width * scale,

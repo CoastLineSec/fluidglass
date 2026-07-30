@@ -59,6 +59,7 @@ struct GlassDrawPlan {
     Rect                            destinationPixels;
     PixelRect                       damageCoverage;
     PixelRect                       captureDamageCoverage;
+    Rect                            continuationDamage = {};
     std::array<TextureCoordinate, 4> sourceCorners;
     DrawSize                        fullSizePixels;
     Point                           clipOffsetPixels;

@@ -100,7 +100,17 @@ Response fields include:
     },
     "presentation_handoffs": {
       "retain_until_drawn": true,
-      "target_kinds": ["layer"]
+      "target_kinds": ["layer"],
+      "geometry_morph": {
+        "layer_targets": true,
+        "coordinate_space": "surface-local",
+        "shapes": ["rounded-rect-uniform-radius"],
+        "easings": ["ease-out-cubic"],
+        "anchor": "compositor-monotonic",
+        "reversal": true,
+        "max_active_per_target": 1,
+        "max_active": 512
+      }
     },
     "operations": [
       "capabilities",
@@ -124,7 +134,8 @@ Response fields include:
       "compound_connectors": 32,
       "bezier_segments": 16,
       "transition_ms": 60000,
-      "presentation_handoff_ms": 2000
+      "presentation_handoff_ms": 2000,
+      "presentation_morph_ms": 1000
     }
   }
 }
@@ -264,6 +275,43 @@ generation and the successor replacement must retain its target id and layer
 namespace. A failed handoff request rejects the replacement and preserves the
 current generation. A successful replacement reports accepted handoffs
 separately from target readiness.
+
+When `presentation_handoffs.geometry_morph` advertises compatible layer,
+coordinate-space, shape, easing, and anchor support, a handoff may also request
+one compositor-timed geometry morph:
+
+```json
+{
+  "handoffs": [
+    {
+      "target_id": "primary-bar",
+      "source_generation": 1,
+      "mode": "retain-until-drawn",
+      "timeout_ms": 750,
+      "morph": {
+        "transition_id": "primary-bar-attach-1",
+        "duration_ms": 240,
+        "easing": "ease-out-cubic",
+        "anchor": "compositor-monotonic"
+      }
+    }
+  ]
+}
+```
+
+The initial morph contract supports surface-local rectangles with one uniform
+rounded-rectangle radius. The response reports the accepted transition id,
+compositor-monotonic anchor, authoritative source and destination endpoints,
+effective duration, easing, and `active`, `completed`, or `failed` state. A
+replacement can reverse an active morph; the accepted source is the
+compositor-visible geometry at replacement time. Unchanged targets may retain
+compatible active motion across a complete generation replacement.
+
+Morph settlement does not imply readiness. The successor remains the only
+authoritative generation and must independently reach `drawn`. Retained
+presentation fallback ends after the successor's first successful draw.
+Timeout, session loss, target removal, surface replacement, or output
+invalidation cancels the morph.
 
 Material fields use the same schema as the
 [Lua configuration](lua-configuration.md#material-definitions).
@@ -659,6 +707,9 @@ attachment information. The response includes definition state, resolution
 state, presentation keys, readiness, the optional `handoff` state, and the
 latest sanitized failure. Handoff state is `retained`, `completed`, or
 `failed`; a retained predecessor never counts as current-generation `drawn`.
+When a geometry morph was accepted, the handoff also reports its endpoints,
+anchor, duration, easing, and state. Aggregate `status` output reports
+presentation morph counts separately from handoff and readiness counts.
 
 ## Readiness inspection
 

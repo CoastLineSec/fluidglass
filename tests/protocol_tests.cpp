@@ -151,7 +151,13 @@ int main() {
                     "target_id":"bar",
                     "source_generation":1,
                     "mode":"retain-until-drawn",
-                    "timeout_ms":500
+                    "timeout_ms":500,
+                    "morph":{
+                        "transition_id":"attach-1",
+                        "duration_ms":240,
+                        "easing":"ease-out-cubic",
+                        "anchor":"compositor-monotonic"
+                    }
                 }]
             })");
             require(result.hasValue(), "valid handoff request failed");
@@ -160,8 +166,25 @@ int main() {
             require(handoffs.size() == 1U &&
                         handoffs.front().targetId == "bar" &&
                         handoffs.front().sourceGeneration == 1U &&
-                        handoffs.front().timeoutMs == 500U,
+                        handoffs.front().timeoutMs == 500U &&
+                        handoffs.front().morph &&
+                        handoffs.front().morph->transitionId == "attach-1" &&
+                        handoffs.front().morph->durationMs == 240U,
                     "handoff fields changed during parsing");
+
+            const auto badEasing = parseRequest(R"({
+                "version":2,"operation":"session.replace",
+                "session_id":"one","token":"two","generation":2,
+                "materials":{"fluid":{}},"targets":[],
+                "handoffs":[{"target_id":"bar","source_generation":1,
+                    "mode":"retain-until-drawn","timeout_ms":500,
+                    "morph":{"transition_id":"bad","duration_ms":200,
+                        "easing":"linear","anchor":"compositor-monotonic"}}]
+            })");
+            require(!badEasing &&
+                        badEasing.error().code ==
+                            ErrorCode::UnsupportedOperation,
+                    "unsupported morph easing was accepted");
 
             const auto unsupported = parseRequest(R"({
                 "version":2,"operation":"session.replace",

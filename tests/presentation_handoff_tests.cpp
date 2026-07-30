@@ -11,14 +11,17 @@ using namespace hfg::v2;
 
 namespace {
 
-Target layer(std::string namespaceName = "hgs:bar:DP-1") {
+Target layer(
+    std::string namespaceName = "hgs:bar:DP-1",
+    Rect geometry = {0.0, 0.0, 800.0, 44.0},
+    double radius = 18.0) {
     return {
         .id = "bar",
         .kind = TargetKind::Layer,
         .material = {.source = MaterialSource::Session, .name = "glass"},
-        .shape = RoundedRectShape{18.0},
+        .shape = RoundedRectShape{radius},
         .selector = LayerSelector{.namespaceName = std::move(namespaceName)},
-        .geometry = Rect{0.0, 0.0, 800.0, 44.0},
+        .geometry = geometry,
         .stage = std::nullopt,
         .transition = std::nullopt,
         .enabled = true,
@@ -181,6 +184,156 @@ int main() {
             require(!tracker.prepare(fixture.current, fixture.replacement,
                                      fixture.readiness),
                     "zero handoff timeout was accepted");
+        }},
+        Case{"morph accepts authoritative endpoints and compositor anchor", [] {
+            Fixture fixture;
+            fixture.current.targets.front() = layer(
+                "hgs:bar:DP-1", {12.0, 8.0, 776.0, 44.0}, 18.0);
+            fixture.replacement.targets.front() = layer(
+                "hgs:bar:DP-1", {0.0, 0.0, 800.0, 44.0}, 0.0);
+            fixture.replacement.handoffs.front().morph =
+                PresentationHandoffRequest::Morph{
+                    .transitionId = "attach-1",
+                    .durationMs = 240,
+                };
+            PresentationHandoffTracker tracker;
+            auto prepared = tracker.prepare(
+                fixture.current, fixture.replacement, fixture.readiness, 1'000);
+            require(prepared && prepared.value().front().morph,
+                    "valid geometry morph was rejected");
+            tracker.commit(
+                fixture.current.owner, 4, prepared.value(), 1'000);
+            const auto record = tracker.target(fixture.identity);
+            require(record && record->morph &&
+                        record->morph->anchorMs == 1'000 &&
+                        record->morph->source.radius == 18.0 &&
+                        record->morph->destination.radius == 0.0 &&
+                        record->morph->envelope ==
+                            Rect{0.0, 0.0, 800.0, 52.0},
+                    "accepted morph did not preserve authoritative geometry");
+            const auto start =
+                resolvePresentationMorph(*record->morph, 1'000);
+            const auto middle =
+                resolvePresentationMorph(*record->morph, 1'120);
+            const auto end =
+                resolvePresentationMorph(*record->morph, 1'240);
+            require(start && middle && end &&
+                        start.value().current == record->morph->source &&
+                        middle.value().current.rect.x > 0.0 &&
+                        middle.value().current.rect.x < 12.0 &&
+                        middle.value().current.radius > 0.0 &&
+                        middle.value().current.radius < 18.0 &&
+                        end.value().current == record->morph->destination &&
+                        !end.value().active,
+                    "morph endpoints or monotonic midpoint are incorrect");
+        }},
+        Case{"reversal starts from compositor-visible geometry", [] {
+            Fixture fixture;
+            fixture.current.targets.front() = layer(
+                "hgs:bar:DP-1", {12.0, 8.0, 776.0, 44.0}, 18.0);
+            fixture.replacement.targets.front() = layer(
+                "hgs:bar:DP-1", {0.0, 0.0, 800.0, 44.0}, 0.0);
+            fixture.replacement.handoffs.front().morph =
+                PresentationHandoffRequest::Morph{
+                    .transitionId = "attach-1",
+                    .durationMs = 240,
+                };
+            PresentationHandoffTracker tracker;
+            auto first = tracker.prepare(
+                fixture.current, fixture.replacement, fixture.readiness, 1'000);
+            require(first.hasValue(), "first morph preparation failed");
+            tracker.commit(fixture.current.owner, 4, first.value(), 1'000);
+            const auto active = tracker.target(fixture.identity);
+            require(active && active->morph, "active morph was not recorded");
+            const auto visible =
+                resolvePresentationMorph(*active->morph, 1'080);
+            require(visible.hasValue(), "active morph could not be inspected");
+
+            auto current = fixture.current;
+            current.generation = 4;
+            current.targets = fixture.replacement.targets;
+            auto reverse = fixture.replacement;
+            reverse.generation = 5;
+            reverse.targets = {layer(
+                "hgs:bar:DP-1", {12.0, 8.0, 776.0, 44.0}, 18.0)};
+            reverse.handoffs.front().sourceGeneration = 4;
+            reverse.handoffs.front().morph =
+                PresentationHandoffRequest::Morph{
+                    .transitionId = "float-2",
+                    .durationMs = 240,
+                };
+            auto prepared = tracker.prepare(
+                current, reverse, fixture.readiness, 1'080);
+            require(prepared && prepared.value().front().morph &&
+                        prepared.value().front().morph->source ==
+                            visible.value().current &&
+                        prepared.value().front().morph->durationMs > 0U &&
+                        prepared.value().front().morph->durationMs < 240U,
+                    "reversal jumped back to a stale endpoint");
+            tracker.commit(current.owner, 5, prepared.value(), 1'080);
+            require(tracker.morphing().size() == 1U &&
+                        tracker.morphing().front().morph->transitionId ==
+                            "float-2",
+                    "superseded morph record was not bounded to one target");
+        }},
+        Case{"an unchanged target keeps its active morph across a generation", [] {
+            Fixture fixture;
+            fixture.current.targets.front() = layer(
+                "hgs:bar:DP-1", {12.0, 8.0, 776.0, 44.0}, 18.0);
+            fixture.replacement.targets.front() = layer(
+                "hgs:bar:DP-1", {0.0, 0.0, 800.0, 44.0}, 0.0);
+            fixture.replacement.handoffs.front().morph =
+                PresentationHandoffRequest::Morph{
+                    .transitionId = "attach-1",
+                    .durationMs = 240,
+                };
+            PresentationHandoffTracker tracker;
+            auto first = tracker.prepare(
+                fixture.current, fixture.replacement, fixture.readiness, 1'000);
+            require(first.hasValue(), "first morph preparation failed");
+            tracker.commit(fixture.current.owner, 4, first.value(), 1'000);
+
+            auto current = fixture.current;
+            current.generation = 4;
+            current.targets = fixture.replacement.targets;
+            auto unrelated = fixture.replacement;
+            unrelated.generation = 5;
+            unrelated.handoffs.front().sourceGeneration = 4;
+            unrelated.handoffs.front().morph.reset();
+            auto prepared = tracker.prepare(
+                current, unrelated, fixture.readiness, 1'080);
+            require(prepared &&
+                        prepared.value().front().preserveActiveMorph,
+                    "unchanged target did not preserve its active morph");
+            tracker.commit(current.owner, 5, prepared.value(), 1'080);
+            const auto continued = tracker.target(fixture.identity);
+            require(continued && continued->morph &&
+                        continued->successorGeneration == 5 &&
+                        continued->morph->transitionId == "attach-1" &&
+                        continued->morph->anchorMs == 1'000,
+                    "unrelated generation restarted or canceled active motion");
+        }},
+        Case{"morph rejects unsupported shape and excessive duration", [] {
+            Fixture fixture;
+            fixture.replacement.handoffs.front().morph =
+                PresentationHandoffRequest::Morph{
+                    .transitionId = "attach-1",
+                    .durationMs = 1'001,
+                };
+            PresentationHandoffTracker tracker;
+            require(!tracker.prepare(
+                        fixture.current, fixture.replacement,
+                        fixture.readiness, 100),
+                    "excessive morph duration was accepted");
+            fixture.replacement.handoffs.front().morph->durationMs = 200;
+            fixture.replacement.targets.front().shape = RingShape{
+                .outerRadius = 18.0,
+                .thickness = 2.0,
+            };
+            require(!tracker.prepare(
+                        fixture.current, fixture.replacement,
+                        fixture.readiness, 100),
+                    "non-rounded shape morph was accepted");
         }},
     });
 }

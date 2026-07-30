@@ -41,6 +41,7 @@ struct ResolvedTarget {
     double             roundingPower = 2.0;
     std::uint64_t      transitionAnchorMs = 0;
     bool               transitionActive = false;
+    std::optional<Rect> transitionEnvelopeGlobal = std::nullopt;
 
     friend bool operator==(const ResolvedTarget&, const ResolvedTarget&) = default;
 };

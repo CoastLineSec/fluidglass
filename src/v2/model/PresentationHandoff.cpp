@@ -3,6 +3,7 @@
 #include "v2/core/Limits.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <set>
 #include <utility>
@@ -32,13 +33,99 @@ std::uint64_t deadline(std::uint64_t nowMs, std::uint64_t timeoutMs) {
     return nowMs + timeoutMs;
 }
 
+const RoundedRectShape* roundedShape(const Target& target) {
+    return std::get_if<RoundedRectShape>(&target.shape);
+}
+
+Rect envelope(const Rect& left, const Rect& right) {
+    const auto x = std::min(left.x, right.x);
+    const auto y = std::min(left.y, right.y);
+    const auto farX = std::max(left.x + left.width, right.x + right.width);
+    const auto farY = std::max(left.y + left.height, right.y + right.height);
+    return {
+        .x = x,
+        .y = y,
+        .width = farX - x,
+        .height = farY - y,
+    };
+}
+
+double easeOutCubic(double progress) {
+    const auto remaining = 1.0 - std::clamp(progress, 0.0, 1.0);
+    return 1.0 - remaining * remaining * remaining;
+}
+
+double interpolate(double source, double destination, double progress) {
+    return std::round(source + (destination - source) * progress);
+}
+
+double endpointDistance(
+    const PresentationMorphEndpoint& source,
+    const PresentationMorphEndpoint& destination) {
+    return std::max({
+        std::abs(source.rect.x - destination.rect.x),
+        std::abs(source.rect.y - destination.rect.y),
+        std::abs(source.rect.width - destination.rect.width),
+        std::abs(source.rect.height - destination.rect.height),
+        std::abs(source.radius - destination.radius),
+    });
+}
+
+std::optional<PresentationMorphEndpoint> targetEndpoint(const Target& target) {
+    const auto* shape = roundedShape(target);
+    if (!target.geometry || !shape)
+        return std::nullopt;
+    return PresentationMorphEndpoint{
+        .rect = *target.geometry,
+        .radius = shape->radius,
+    };
+}
+
 } // namespace
+
+Result<ResolvedPresentationMorph> resolvePresentationMorph(
+    const PresentationMorphRecord& morph,
+    std::uint64_t nowMs) {
+    if (morph.durationMs == 0U)
+        return failure<ResolvedPresentationMorph>(
+            ErrorCode::InvalidRequest,
+            "morph.duration_ms",
+            "morph duration must not be zero");
+    const auto elapsed = nowMs > morph.anchorMs
+        ? nowMs - morph.anchorMs
+        : 0U;
+    const auto linear = std::min(
+        1.0,
+        static_cast<double>(elapsed) /
+            static_cast<double>(morph.durationMs));
+    const auto progress = easeOutCubic(linear);
+    const auto& source = morph.source;
+    const auto& destination = morph.destination;
+    return Result<ResolvedPresentationMorph>::success({
+        .current = {
+            .rect = {
+                .x = interpolate(source.rect.x, destination.rect.x, progress),
+                .y = interpolate(source.rect.y, destination.rect.y, progress),
+                .width = interpolate(source.rect.width, destination.rect.width,
+                                     progress),
+                .height = interpolate(source.rect.height,
+                                      destination.rect.height, progress),
+            },
+            .radius = interpolate(source.radius, destination.radius, progress),
+        },
+        .envelope = morph.envelope,
+        .progress = linear,
+        .active = morph.state == PresentationMorphState::Active &&
+            linear < 1.0,
+    });
+}
 
 Result<std::vector<PreparedPresentationHandoff>>
 PresentationHandoffTracker::prepare(
     const SessionSnapshot& current,
     const SessionReplacement& replacement,
-    const ReadinessTracker& readiness) const {
+    const ReadinessTracker& readiness,
+    std::uint64_t nowMs) const {
     std::vector<PreparedPresentationHandoff> prepared;
     prepared.reserve(replacement.handoffs.size());
     std::set<std::string_view> targetIds;
@@ -89,11 +176,26 @@ PresentationHandoffTracker::prepare(
             .owner = current.owner,
             .targetId = request.targetId,
         };
+        const auto existing = m_records.find(identity);
+        const auto activeMorph =
+            existing != m_records.end() &&
+            existing->second.successorGeneration == current.generation &&
+            existing->second.morph &&
+            existing->second.morph->state ==
+                PresentationMorphState::Active &&
+            std::ranges::any_of(
+                existing->second.presentations,
+                [](const PresentationHandoffPresentation& presentation) {
+                    return presentation.state ==
+                        PresentationHandoffState::Retained;
+                });
         const auto presentations = readiness.presentations(identity);
-        if (presentations.empty() ||
-            std::ranges::any_of(presentations, [](const auto& entry) {
+        const auto fullyDrawn =
+            !presentations.empty() &&
+            std::ranges::none_of(presentations, [](const auto& entry) {
                 return entry.second.state != ReadinessState::Drawn;
-            }))
+            });
+        if (!fullyDrawn && !activeMorph)
             return failure<std::vector<PreparedPresentationHandoff>>(
                 ErrorCode::UnresolvedTarget,
                 path + ".target_id",
@@ -109,11 +211,91 @@ PresentationHandoffTracker::prepare(
             .sourceGeneration = request.sourceGeneration,
             .timeoutMs = request.timeoutMs,
             .presentations = {},
+            .morph = std::nullopt,
+            .preserveActiveMorph = false,
         };
-        item.presentations.reserve(presentations.size());
-        for (const auto& [key, record] : presentations) {
-            static_cast<void>(record);
-            item.presentations.push_back(key);
+        item.presentations.reserve(
+            fullyDrawn
+                ? presentations.size()
+                : existing->second.presentations.size());
+        if (fullyDrawn) {
+            for (const auto& [key, record] : presentations) {
+                static_cast<void>(record);
+                item.presentations.push_back(key);
+            }
+        } else {
+            for (const auto& presentation :
+                 existing->second.presentations)
+                if (presentation.state ==
+                    PresentationHandoffState::Retained)
+                    item.presentations.push_back(presentation.key);
+        }
+        if (request.morph) {
+            if (request.morph->transitionId.empty() ||
+                request.morph->transitionId.size() >
+                    Limits::MAX_IDENTIFIER_BYTES)
+                return failure<std::vector<PreparedPresentationHandoff>>(
+                    ErrorCode::InvalidRequest,
+                    path + ".morph.transition_id",
+                    "morph transition id is invalid");
+            if (request.morph->durationMs == 0U ||
+                request.morph->durationMs >
+                    Limits::MAX_PRESENTATION_MORPH_MS ||
+                request.morph->durationMs > request.timeoutMs)
+                return failure<std::vector<PreparedPresentationHandoff>>(
+                    ErrorCode::InvalidRequest,
+                    path + ".morph.duration_ms",
+                    "morph duration is outside the supported handoff range");
+            const auto destination = targetEndpoint(*successor);
+            auto source = targetEndpoint(*previous);
+            const auto fullSource = source;
+            if (!source || !destination)
+                return failure<std::vector<PreparedPresentationHandoff>>(
+                    ErrorCode::UnsupportedTarget,
+                    path + ".morph",
+                    "geometry morph requires surface-local rounded rectangles");
+            if (existing != m_records.end() &&
+                existing->second.successorGeneration == current.generation &&
+                existing->second.morph &&
+                existing->second.morph->state !=
+                    PresentationMorphState::Failed) {
+                auto visible = resolvePresentationMorph(
+                    *existing->second.morph,
+                    nowMs);
+                if (!visible)
+                    return failure<std::vector<PreparedPresentationHandoff>>(
+                        visible.error().code,
+                        path + "." + visible.error().path,
+                        visible.error().message);
+                source = visible.value().current;
+            }
+            auto effectiveDuration = request.morph->durationMs;
+            if (fullSource && source != fullSource) {
+                const auto fullDistance =
+                    endpointDistance(*fullSource, *destination);
+                const auto remainingDistance =
+                    endpointDistance(*source, *destination);
+                if (fullDistance > 0.0)
+                    effectiveDuration = std::max<std::uint64_t>(
+                        1U,
+                        static_cast<std::uint64_t>(std::llround(
+                            static_cast<double>(effectiveDuration) *
+                            std::clamp(
+                                remainingDistance / fullDistance,
+                                0.0,
+                                1.0))));
+            }
+            item.morph = PreparedPresentationMorph{
+                .transitionId = request.morph->transitionId,
+                .source = *source,
+                .destination = *destination,
+                .durationMs = effectiveDuration,
+            };
+        } else if (activeMorph) {
+            const auto destination = targetEndpoint(*successor);
+            item.preserveActiveMorph =
+                destination &&
+                *destination == existing->second.morph->destination;
         }
         prepared.push_back(std::move(item));
     }
@@ -126,6 +308,19 @@ void PresentationHandoffTracker::commit(
     std::uint64_t successorGeneration,
     std::span<const PreparedPresentationHandoff> prepared,
     std::uint64_t nowMs) {
+    std::map<TargetIdentity, PresentationMorphRecord> preservedMorphs;
+    for (const auto& item : prepared) {
+        if (!item.preserveActiveMorph)
+            continue;
+        const auto existing = m_records.find(item.identity);
+        if (existing != m_records.end() &&
+            existing->second.morph &&
+            existing->second.morph->state ==
+                PresentationMorphState::Active)
+            preservedMorphs.insert_or_assign(
+                item.identity,
+                *existing->second.morph);
+    }
     eraseOwner(owner);
     for (const auto& item : prepared) {
         PresentationHandoffRecord record{
@@ -134,6 +329,7 @@ void PresentationHandoffTracker::commit(
             .successorGeneration = successorGeneration,
             .expiresAtMs = deadline(nowMs, item.timeoutMs),
             .presentations = {},
+            .morph = std::nullopt,
         };
         record.presentations.reserve(item.presentations.size());
         for (const auto& key : item.presentations)
@@ -142,6 +338,23 @@ void PresentationHandoffTracker::commit(
                 .state = PresentationHandoffState::Retained,
                 .detail = {},
             });
+        if (item.morph)
+            record.morph = PresentationMorphRecord{
+                .transitionId = item.morph->transitionId,
+                .source = item.morph->source,
+                .destination = item.morph->destination,
+                .envelope = envelope(
+                    item.morph->source.rect,
+                    item.morph->destination.rect),
+                .anchorMs = nowMs,
+                .durationMs = item.morph->durationMs,
+                .state = PresentationMorphState::Active,
+                .detail = {},
+            };
+        else if (const auto preserved =
+                     preservedMorphs.find(item.identity);
+                 preserved != preservedMorphs.end())
+            record.morph = preserved->second;
         m_records.insert_or_assign(record.identity, std::move(record));
     }
 }
@@ -170,6 +383,10 @@ void PresentationHandoffTracker::fail(
             presentation.state = PresentationHandoffState::Failed;
             presentation.detail = detail;
         }
+    if (found->second.morph) {
+        found->second.morph->state = PresentationMorphState::Failed;
+        found->second.morph->detail = detail;
+    }
 }
 
 void PresentationHandoffTracker::fail(
@@ -183,11 +400,26 @@ void PresentationHandoffTracker::fail(
             presentation.state = PresentationHandoffState::Failed;
             presentation.detail = detail;
         }
+    if (found->second.morph) {
+        found->second.morph->state = PresentationMorphState::Failed;
+        found->second.morph->detail = detail;
+    }
 }
 
 void PresentationHandoffTracker::expire(std::uint64_t nowMs) {
     for (auto& [identity, record] : m_records) {
         static_cast<void>(identity);
+        if (record.morph &&
+            record.morph->state == PresentationMorphState::Active) {
+            if (record.expiresAtMs <= nowMs) {
+                record.morph->state = PresentationMorphState::Failed;
+                record.morph->detail = "handoff timeout expired";
+            } else if (deadline(record.morph->anchorMs,
+                                record.morph->durationMs) <= nowMs) {
+                record.morph->state = PresentationMorphState::Completed;
+                record.morph->detail.clear();
+            }
+        }
         if (record.expiresAtMs > nowMs)
             continue;
         for (auto& presentation : record.presentations)
@@ -225,6 +457,18 @@ PresentationHandoffTracker::active() const {
         if (std::ranges::any_of(record.presentations, [](const auto& item) {
                 return item.state == PresentationHandoffState::Retained;
             }))
+            result.push_back(record);
+    }
+    return result;
+}
+
+std::vector<PresentationHandoffRecord>
+PresentationHandoffTracker::morphing() const {
+    std::vector<PresentationHandoffRecord> result;
+    for (const auto& [identity, record] : m_records) {
+        static_cast<void>(identity);
+        if (record.morph &&
+            record.morph->state == PresentationMorphState::Active)
             result.push_back(record);
     }
     return result;

@@ -191,6 +191,35 @@ int main() {
             require(result.value().captures[1].bytesPerPixel == 8U,
                     "FP16 format size changed");
         }},
+        Case{"geometry morph captures its stable endpoint union", [] {
+            auto planned = presentation(
+                "bar",
+                PixelRect{12, 8, 76, 44},
+                AR24,
+                0,
+                RenderStage::PostLayer,
+                1,
+                TargetKind::Layer);
+            planned.transitionEnvelope = MappedGeometry{
+                .clippedGlobal = {0.0, 0.0, 100.0, 52.0},
+                .outputLocal = {0.0, 0.0, 100.0, 52.0},
+                .bufferRect = {0.0, 0.0, 100.0, 52.0},
+                .coverage = {0, 0, 100, 52},
+                .semanticCorners = {},
+            };
+            const auto input = scene({planned});
+            const std::array formats{CaptureFormatLayout{AR24, 4}};
+            const auto result = buildCaptureScene(
+                input,
+                formats,
+                limits());
+            require(result && result.value().captures.size() == 1U &&
+                        result.value().captures.front().region ==
+                            PixelRect{0, 0, 100, 52} &&
+                        result.value().assignments.front().required.region ==
+                            PixelRect{0, 0, 100, 52},
+                    "active morph did not retain one endpoint-union capture");
+        }},
         Case{"different windows never share a pre-window capture", [] {
             const auto input = scene({
                 presentation(

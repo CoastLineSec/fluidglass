@@ -30,9 +30,17 @@ struct SessionHandle {
 };
 
 struct PresentationHandoffRequest {
+    struct Morph {
+        std::string   transitionId;
+        std::uint64_t durationMs = 0;
+
+        friend bool operator==(const Morph&, const Morph&) = default;
+    };
+
     std::string   targetId;
     std::uint64_t sourceGeneration = 0;
     std::uint64_t timeoutMs = 0;
+    std::optional<Morph> morph = std::nullopt;
 
     friend bool operator==(const PresentationHandoffRequest&,
                            const PresentationHandoffRequest&) = default;

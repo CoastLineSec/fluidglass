@@ -187,10 +187,44 @@ Result<void> HyprlandGlassSceneController::refreshResolvedScene(
                                     outputs.value().current);
     if (!targets)
         return Result<void>::failure(targets.error());
+    for (const auto& record : m_runtime.handoffTracker().morphing()) {
+        const auto currentTarget = std::ranges::find_if(
+            targets.value().effective,
+            [&](const ResolvedTarget& target) {
+                return target.attachment.identity == record.identity;
+            });
+        const auto previousTarget = std::ranges::find_if(
+            m_presentations.presentations,
+            [&](const PlannedPresentation& presentation) {
+                return presentation.target.attachment.identity ==
+                    record.identity;
+            });
+        const auto outputCurrent = std::ranges::all_of(
+            record.presentations,
+            [&](const PresentationHandoffPresentation& presentation) {
+                return std::ranges::any_of(
+                    outputs.value().current,
+                    [&](const OutputGeneration& output) {
+                        return output.snapshot.name ==
+                                presentation.key.output &&
+                            output.generation ==
+                                presentation.key.outputGeneration;
+                    });
+            });
+        if (currentTarget == targets.value().effective.end() ||
+            previousTarget == m_presentations.presentations.end() ||
+            currentTarget->attachment.objectToken !=
+                previousTarget->target.attachment.objectToken ||
+            !outputCurrent)
+            m_runtime.handoffTracker().fail(
+                record.identity,
+                "morph presentation identity changed");
+    }
     auto presentations =
         buildPresentationScene(targets.value(),
                                m_runtime.configStore().active(), sessions,
-                               outputs.value().current, nowMs);
+                               outputs.value().current, nowMs,
+                               &m_runtime.handoffTracker());
     if (!presentations)
         return Result<void>::failure(presentations.error());
     auto bindings =
