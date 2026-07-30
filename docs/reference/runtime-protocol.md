@@ -104,6 +104,7 @@ Response fields include:
       "geometry_morph": {
         "layer_targets": true,
         "coordinate_space": "surface-local",
+        "coordinate_spaces": ["surface-local", "output-local"],
         "shapes": ["rounded-rect-uniform-radius"],
         "easings": ["ease-out-cubic"],
         "anchor": "compositor-monotonic",
@@ -299,10 +300,18 @@ one compositor-timed geometry morph:
 }
 ```
 
-The initial morph contract supports surface-local rectangles with one uniform
-rounded-rectangle radius. The response reports the accepted transition id,
+The morph contract supports surface-local rectangles and capability-gated
+output-local rectangles with one uniform rounded-rectangle radius. An
+output-local request includes exact `source` and `destination` objects, each
+containing a `rect` and `radius`, and sets
+`"coordinate_space": "output-local"`. The endpoint sizes and radii must match
+the source and successor targets.
+
+The response reports the accepted transition id,
 compositor-monotonic anchor, authoritative source and destination endpoints,
-effective duration, easing, and `active`, `completed`, or `failed` state. A
+effective duration, easing, coordinate space, and `active`, `settling`,
+`completed`, or `failed` state. Output-local geometry remains authoritative
+while `settling` until the live layer attachment reaches its destination. A
 replacement can reverse an active morph; the accepted source is the
 compositor-visible geometry at replacement time. Unchanged targets may retain
 compatible active motion across a complete generation replacement.

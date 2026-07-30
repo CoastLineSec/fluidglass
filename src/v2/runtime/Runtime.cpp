@@ -282,6 +282,10 @@ json capabilitiesJson(const RendererRuntimeStatus& renderer) {
             {"geometry_morph", {
                 {"layer_targets", true},
                 {"coordinate_space", "surface-local"},
+                {"coordinate_spaces", json::array({
+                    "surface-local",
+                    "output-local",
+                })},
                 {"shapes", json::array({"rounded-rect-uniform-radius"})},
                 {"easings", json::array({"ease-out-cubic"})},
                 {"anchor", "compositor-monotonic"},
@@ -456,6 +460,12 @@ json handoffJson(const PresentationHandoffRecord& handoff) {
         morph = {
             {"transition_id", handoff.morph->transitionId},
             {"state", presentationMorphStateName(handoff.morph->state)},
+            {"coordinate_space",
+             handoff.morph->coordinateSpace ==
+                     PresentationHandoffRequest::MorphCoordinateSpace::
+                         OutputLocal
+                 ? "output-local"
+                 : "surface-local"},
             {"anchor_ms", handoff.morph->anchorMs},
             {"duration_ms", handoff.morph->durationMs},
             {"easing", "ease-out-cubic"},

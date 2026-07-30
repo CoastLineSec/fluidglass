@@ -81,6 +81,27 @@ std::optional<PresentationMorphEndpoint> targetEndpoint(const Target& target) {
     };
 }
 
+bool validMorphEndpoint(const PresentationMorphEndpoint& endpoint) {
+    return std::isfinite(endpoint.rect.x) &&
+        std::isfinite(endpoint.rect.y) &&
+        std::isfinite(endpoint.rect.width) &&
+        std::isfinite(endpoint.rect.height) &&
+        endpoint.rect.width > 0.0 &&
+        endpoint.rect.height > 0.0 &&
+        std::isfinite(endpoint.radius) &&
+        endpoint.radius >= 0.0 &&
+        endpoint.radius <=
+            std::min(endpoint.rect.width, endpoint.rect.height) / 2.0;
+}
+
+PresentationMorphEndpoint endpointFromRequest(
+    const PresentationHandoffRequest::MorphEndpoint& endpoint) {
+    return {
+        .rect = endpoint.rect,
+        .radius = endpoint.radius,
+    };
+}
+
 } // namespace
 
 Result<ResolvedPresentationMorph> resolvePresentationMorph(
@@ -177,12 +198,16 @@ PresentationHandoffTracker::prepare(
             .targetId = request.targetId,
         };
         const auto existing = m_records.find(identity);
-        const auto activeMorph =
+        const auto existingMorphActive =
             existing != m_records.end() &&
             existing->second.successorGeneration == current.generation &&
             existing->second.morph &&
-            existing->second.morph->state ==
-                PresentationMorphState::Active &&
+            (existing->second.morph->state ==
+                 PresentationMorphState::Active ||
+             existing->second.morph->state ==
+                 PresentationMorphState::Settling);
+        const auto activeMorph =
+            existingMorphActive &&
             std::ranges::any_of(
                 existing->second.presentations,
                 [](const PresentationHandoffPresentation& presentation) {
@@ -246,19 +271,61 @@ PresentationHandoffTracker::prepare(
                     ErrorCode::InvalidRequest,
                     path + ".morph.duration_ms",
                     "morph duration is outside the supported handoff range");
-            const auto destination = targetEndpoint(*successor);
-            auto source = targetEndpoint(*previous);
+            std::optional<PresentationMorphEndpoint> destination;
+            std::optional<PresentationMorphEndpoint> source;
+            if (request.morph->coordinateSpace ==
+                PresentationHandoffRequest::MorphCoordinateSpace::OutputLocal) {
+                if (!request.morph->source ||
+                    !request.morph->destination)
+                    return failure<std::vector<PreparedPresentationHandoff>>(
+                        ErrorCode::InvalidRequest,
+                        path + ".morph",
+                        "output-local morph requires source and destination endpoints");
+                source = endpointFromRequest(*request.morph->source);
+                destination =
+                    endpointFromRequest(*request.morph->destination);
+                const auto previousEndpoint = targetEndpoint(*previous);
+                const auto successorEndpoint = targetEndpoint(*successor);
+                if (!previousEndpoint || !successorEndpoint ||
+                    source->rect.width != previousEndpoint->rect.width ||
+                    source->rect.height != previousEndpoint->rect.height ||
+                    source->radius != previousEndpoint->radius ||
+                    destination->rect.width !=
+                        successorEndpoint->rect.width ||
+                    destination->rect.height !=
+                        successorEndpoint->rect.height ||
+                    destination->radius != successorEndpoint->radius)
+                    return failure<std::vector<PreparedPresentationHandoff>>(
+                        ErrorCode::InvalidTarget,
+                        path + ".morph",
+                        "output-local endpoints must match the source and destination target size and radius");
+            } else {
+                destination = targetEndpoint(*successor);
+                source = targetEndpoint(*previous);
+                if (request.morph->source ||
+                    request.morph->destination)
+                    return failure<std::vector<PreparedPresentationHandoff>>(
+                        ErrorCode::InvalidRequest,
+                        path + ".morph",
+                        "surface-local morph derives its endpoints from the targets");
+            }
             const auto fullSource = source;
-            if (!source || !destination)
+            if (!source || !destination ||
+                !validMorphEndpoint(*source) ||
+                !validMorphEndpoint(*destination))
                 return failure<std::vector<PreparedPresentationHandoff>>(
                     ErrorCode::UnsupportedTarget,
                     path + ".morph",
-                    "geometry morph requires surface-local rounded rectangles");
+                    "geometry morph requires valid uniform rounded rectangles");
             if (existing != m_records.end() &&
                 existing->second.successorGeneration == current.generation &&
                 existing->second.morph &&
-                existing->second.morph->state !=
-                    PresentationMorphState::Failed) {
+                existing->second.morph->coordinateSpace ==
+                    request.morph->coordinateSpace &&
+                (existing->second.morph->state ==
+                     PresentationMorphState::Active ||
+                 existing->second.morph->state ==
+                     PresentationMorphState::Settling)) {
                 auto visible = resolvePresentationMorph(
                     *existing->second.morph,
                     nowMs);
@@ -287,15 +354,21 @@ PresentationHandoffTracker::prepare(
             }
             item.morph = PreparedPresentationMorph{
                 .transitionId = request.morph->transitionId,
+                .coordinateSpace = request.morph->coordinateSpace,
                 .source = *source,
                 .destination = *destination,
                 .durationMs = effectiveDuration,
             };
-        } else if (activeMorph) {
-            const auto destination = targetEndpoint(*successor);
-            item.preserveActiveMorph =
-                destination &&
-                *destination == existing->second.morph->destination;
+        } else if (existingMorphActive) {
+            if (existing->second.morph->coordinateSpace ==
+                PresentationHandoffRequest::MorphCoordinateSpace::OutputLocal)
+                item.preserveActiveMorph = true;
+            else {
+                const auto destination = targetEndpoint(*successor);
+                item.preserveActiveMorph =
+                    destination &&
+                    *destination == existing->second.morph->destination;
+            }
         }
         prepared.push_back(std::move(item));
     }
@@ -315,8 +388,10 @@ void PresentationHandoffTracker::commit(
         const auto existing = m_records.find(item.identity);
         if (existing != m_records.end() &&
             existing->second.morph &&
-            existing->second.morph->state ==
-                PresentationMorphState::Active)
+            (existing->second.morph->state ==
+                 PresentationMorphState::Active ||
+             existing->second.morph->state ==
+                 PresentationMorphState::Settling))
             preservedMorphs.insert_or_assign(
                 item.identity,
                 *existing->second.morph);
@@ -341,6 +416,7 @@ void PresentationHandoffTracker::commit(
         if (item.morph)
             record.morph = PresentationMorphRecord{
                 .transitionId = item.morph->transitionId,
+                .coordinateSpace = item.morph->coordinateSpace,
                 .source = item.morph->source,
                 .destination = item.morph->destination,
                 .envelope = envelope(
@@ -406,18 +482,41 @@ void PresentationHandoffTracker::fail(
     }
 }
 
+void PresentationHandoffTracker::settleMorph(
+    const TargetIdentity& identity) {
+    const auto found = m_records.find(identity);
+    if (found == m_records.end() || !found->second.morph)
+        return;
+    auto& morph = *found->second.morph;
+    if (morph.state != PresentationMorphState::Active &&
+        morph.state != PresentationMorphState::Settling)
+        return;
+    morph.state = PresentationMorphState::Completed;
+    morph.detail.clear();
+}
+
 void PresentationHandoffTracker::expire(std::uint64_t nowMs) {
     for (auto& [identity, record] : m_records) {
         static_cast<void>(identity);
         if (record.morph &&
-            record.morph->state == PresentationMorphState::Active) {
+            (record.morph->state == PresentationMorphState::Active ||
+             record.morph->state == PresentationMorphState::Settling)) {
             if (record.expiresAtMs <= nowMs) {
                 record.morph->state = PresentationMorphState::Failed;
                 record.morph->detail = "handoff timeout expired";
             } else if (deadline(record.morph->anchorMs,
                                 record.morph->durationMs) <= nowMs) {
-                record.morph->state = PresentationMorphState::Completed;
-                record.morph->detail.clear();
+                if (record.morph->coordinateSpace ==
+                    PresentationHandoffRequest::MorphCoordinateSpace::OutputLocal) {
+                    record.morph->state =
+                        PresentationMorphState::Settling;
+                    record.morph->detail =
+                        "waiting for the layer attachment to settle";
+                } else {
+                    record.morph->state =
+                        PresentationMorphState::Completed;
+                    record.morph->detail.clear();
+                }
             }
         }
         if (record.expiresAtMs > nowMs)
@@ -468,7 +567,8 @@ PresentationHandoffTracker::morphing() const {
     for (const auto& [identity, record] : m_records) {
         static_cast<void>(identity);
         if (record.morph &&
-            record.morph->state == PresentationMorphState::Active)
+            (record.morph->state == PresentationMorphState::Active ||
+             record.morph->state == PresentationMorphState::Settling))
             result.push_back(record);
     }
     return result;

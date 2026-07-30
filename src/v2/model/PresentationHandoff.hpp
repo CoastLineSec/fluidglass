@@ -32,6 +32,7 @@ enum class PresentationHandoffState {
 
 enum class PresentationMorphState {
     Active,
+    Settling,
     Completed,
     Failed,
 };
@@ -40,6 +41,7 @@ enum class PresentationMorphState {
     PresentationMorphState state) noexcept {
     switch (state) {
         case PresentationMorphState::Active:    return "active";
+        case PresentationMorphState::Settling:  return "settling";
         case PresentationMorphState::Completed: return "completed";
         case PresentationMorphState::Failed:    return "failed";
     }
@@ -55,21 +57,26 @@ struct PresentationMorphEndpoint {
 };
 
 struct PreparedPresentationMorph {
-    std::string               transitionId;
-    PresentationMorphEndpoint source;
-    PresentationMorphEndpoint destination;
-    std::uint64_t             durationMs = 0;
+    std::string                                      transitionId;
+    PresentationHandoffRequest::MorphCoordinateSpace coordinateSpace =
+        PresentationHandoffRequest::MorphCoordinateSpace::SurfaceLocal;
+    PresentationMorphEndpoint                        source;
+    PresentationMorphEndpoint                        destination;
+    std::uint64_t                                    durationMs = 0;
 };
 
 struct PresentationMorphRecord {
-    std::string               transitionId;
-    PresentationMorphEndpoint source;
-    PresentationMorphEndpoint destination;
-    Rect                      envelope;
-    std::uint64_t             anchorMs = 0;
-    std::uint64_t             durationMs = 0;
-    PresentationMorphState    state = PresentationMorphState::Active;
-    std::string               detail;
+    std::string                                      transitionId;
+    PresentationHandoffRequest::MorphCoordinateSpace coordinateSpace =
+        PresentationHandoffRequest::MorphCoordinateSpace::SurfaceLocal;
+    PresentationMorphEndpoint                        source;
+    PresentationMorphEndpoint                        destination;
+    Rect                                             envelope;
+    std::uint64_t                                    anchorMs = 0;
+    std::uint64_t                                    durationMs = 0;
+    PresentationMorphState                           state =
+        PresentationMorphState::Active;
+    std::string                                      detail;
 
     friend bool operator==(const PresentationMorphRecord&,
                            const PresentationMorphRecord&) = default;
@@ -136,6 +143,7 @@ class PresentationHandoffTracker {
     void complete(const PresentationKey& key);
     void fail(const PresentationKey& key, std::string detail);
     void fail(const TargetIdentity& identity, std::string detail);
+    void settleMorph(const TargetIdentity& identity);
     void expire(std::uint64_t nowMs);
     void eraseOwner(std::string_view owner);
     void clear() noexcept;

@@ -290,6 +290,46 @@ Result<Rect> parseLocalRect(const json& object, std::string path) {
     return Result<Rect>::success(rect);
 }
 
+Result<PresentationHandoffRequest::MorphEndpoint> parseMorphEndpoint(
+    const json& object,
+    std::string path) {
+    if (!object.is_object())
+        return invalid<PresentationHandoffRequest::MorphEndpoint>(
+            ErrorCode::InvalidRequest,
+            std::move(path),
+            "morph endpoint must be an object");
+    if (auto error = rejectUnknown(
+            object, {"rect", "radius"}, path))
+        return Result<PresentationHandoffRequest::MorphEndpoint>::failure(
+            std::move(*error));
+    const auto rectValue = object.find("rect");
+    if (rectValue == object.end())
+        return invalid<PresentationHandoffRequest::MorphEndpoint>(
+            ErrorCode::InvalidRequest,
+            path + ".rect",
+            "morph endpoint requires a rectangle");
+    auto rect = parseLocalRect(*rectValue, path + ".rect");
+    if (!rect)
+        return Result<PresentationHandoffRequest::MorphEndpoint>::failure(
+            rect.error());
+    const auto radiusValue = object.find("radius");
+    if (radiusValue == object.end() || !radiusValue->is_number())
+        return invalid<PresentationHandoffRequest::MorphEndpoint>(
+            ErrorCode::InvalidRequest,
+            path + ".radius",
+            "morph endpoint radius must be a number");
+    const auto radius = radiusValue->get<double>();
+    if (!std::isfinite(radius))
+        return invalid<PresentationHandoffRequest::MorphEndpoint>(
+            ErrorCode::InvalidRequest,
+            path + ".radius",
+            "morph endpoint radius must be finite");
+    return Result<PresentationHandoffRequest::MorphEndpoint>::success({
+        .rect = rect.value(),
+        .radius = radius,
+    });
+}
+
 Result<CornerRadii> parseCornerRadii(const json& object, std::string path) {
     if (!object.is_object())
         return invalid<CornerRadii>(ErrorCode::InvalidTarget, std::move(path), "corner radii must be an object");
@@ -972,7 +1012,8 @@ Result<Request> parseDocument(const json& document) {
                     if (auto error = rejectUnknown(
                             *found,
                             {"transition_id", "duration_ms", "easing",
-                             "anchor"},
+                             "anchor", "coordinate_space", "source",
+                             "destination"},
                             path + ".morph"))
                         return Result<Request>::failure(std::move(*error));
                     const auto transitionId = requiredString(
@@ -1005,9 +1046,75 @@ Result<Request> parseDocument(const json& document) {
                             ErrorCode::UnsupportedOperation,
                             path + ".morph.anchor",
                             "handoff morph anchor is unsupported");
+                    auto coordinateSpace =
+                        PresentationHandoffRequest::MorphCoordinateSpace::
+                            SurfaceLocal;
+                    if (const auto space =
+                            found->find("coordinate_space");
+                        space != found->end()) {
+                        if (!space->is_string())
+                            return invalid<Request>(
+                                ErrorCode::InvalidRequest,
+                                path + ".morph.coordinate_space",
+                                "handoff morph coordinate space must be a string");
+                        if (space->get<std::string>() == "surface-local")
+                            coordinateSpace =
+                                PresentationHandoffRequest::
+                                    MorphCoordinateSpace::SurfaceLocal;
+                        else if (space->get<std::string>() ==
+                                 "output-local")
+                            coordinateSpace =
+                                PresentationHandoffRequest::
+                                    MorphCoordinateSpace::OutputLocal;
+                        else
+                            return invalid<Request>(
+                                ErrorCode::UnsupportedOperation,
+                                path + ".morph.coordinate_space",
+                                "handoff morph coordinate space is unsupported");
+                    }
+                    std::optional<
+                        PresentationHandoffRequest::MorphEndpoint> source;
+                    std::optional<
+                        PresentationHandoffRequest::MorphEndpoint>
+                        destination;
+                    const auto sourceValue = found->find("source");
+                    const auto destinationValue =
+                        found->find("destination");
+                    if (coordinateSpace ==
+                        PresentationHandoffRequest::MorphCoordinateSpace::
+                            OutputLocal) {
+                        if (sourceValue == found->end() ||
+                            destinationValue == found->end())
+                            return invalid<Request>(
+                                ErrorCode::InvalidRequest,
+                                path + ".morph",
+                                "output-local morph requires source and destination endpoints");
+                        auto parsedSource = parseMorphEndpoint(
+                            *sourceValue,
+                            path + ".morph.source");
+                        if (!parsedSource)
+                            return Result<Request>::failure(
+                                parsedSource.error());
+                        auto parsedDestination = parseMorphEndpoint(
+                            *destinationValue,
+                            path + ".morph.destination");
+                        if (!parsedDestination)
+                            return Result<Request>::failure(
+                                parsedDestination.error());
+                        source = parsedSource.value();
+                        destination = parsedDestination.value();
+                    } else if (sourceValue != found->end() ||
+                               destinationValue != found->end())
+                        return invalid<Request>(
+                            ErrorCode::InvalidRequest,
+                            path + ".morph",
+                            "surface-local morph endpoints are derived from the targets");
                     morph = PresentationHandoffRequest::Morph{
                         .transitionId = transitionId.value(),
                         .durationMs = duration.value(),
+                        .coordinateSpace = coordinateSpace,
+                        .source = std::move(source),
+                        .destination = std::move(destination),
                     };
                 }
                 replacement.handoffs.push_back({

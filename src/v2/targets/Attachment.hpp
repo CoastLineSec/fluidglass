@@ -19,6 +19,7 @@ struct ResolvedAttachment {
     TargetKind                 kind = TargetKind::Region;
     std::uint64_t              objectToken = 0;
     Rect                       globalGeometry;
+    std::optional<Rect>        containerGlobalGeometry = std::nullopt;
     RenderStage                stage = RenderStage::PostWindows;
     std::optional<std::string> outputFilter;
     double                     opacity = 1.0;

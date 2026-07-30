@@ -313,6 +313,147 @@ int main() {
                         continued->morph->anchorMs == 1'000,
                     "unrelated generation restarted or canceled active motion");
         }},
+        Case{"output-local morph accepts explicit monitor endpoints", [] {
+            Fixture fixture;
+            fixture.current.targets.front() = layer(
+                "hgs:bar:DP-1", {12.0, 8.0, 776.0, 44.0}, 18.0);
+            fixture.replacement.targets.front() = layer(
+                "hgs:bar:DP-1", {0.0, 0.0, 800.0, 44.0}, 0.0);
+            fixture.replacement.handoffs.front().morph =
+                PresentationHandoffRequest::Morph{
+                    .transitionId = "bottom-attach",
+                    .durationMs = 240,
+                    .coordinateSpace =
+                        PresentationHandoffRequest::MorphCoordinateSpace::
+                            OutputLocal,
+                    .source = PresentationHandoffRequest::MorphEndpoint{
+                        .rect = {12.0, 48.0, 776.0, 44.0},
+                        .radius = 18.0,
+                    },
+                    .destination =
+                        PresentationHandoffRequest::MorphEndpoint{
+                            .rect = {0.0, 56.0, 800.0, 44.0},
+                            .radius = 0.0,
+                        },
+                };
+            PresentationHandoffTracker tracker;
+            auto prepared = tracker.prepare(
+                fixture.current, fixture.replacement,
+                fixture.readiness, 1'000);
+            require(prepared && prepared.value().front().morph &&
+                        prepared.value().front().morph->coordinateSpace ==
+                            PresentationHandoffRequest::
+                                MorphCoordinateSpace::OutputLocal &&
+                        prepared.value().front().morph->source.rect ==
+                            Rect{12.0, 48.0, 776.0, 44.0} &&
+                        prepared.value().front().morph->destination.rect ==
+                            Rect{0.0, 56.0, 800.0, 44.0},
+                    "output-local endpoints were not preserved");
+            tracker.commit(
+                fixture.current.owner, 4, prepared.value(), 1'000);
+            tracker.expire(1'240);
+            const auto settling = tracker.target(fixture.identity);
+            require(settling && settling->morph &&
+                        settling->morph->state ==
+                            PresentationMorphState::Settling &&
+                        tracker.morphing().size() == 1U,
+                    "output-local endpoint override retired before settlement");
+            auto current = fixture.current;
+            current.generation = 4;
+            current.targets = fixture.replacement.targets;
+            auto unrelated = fixture.replacement;
+            unrelated.generation = 5;
+            unrelated.handoffs.front().sourceGeneration = 4;
+            unrelated.handoffs.front().morph.reset();
+            auto preserved = tracker.prepare(
+                current, unrelated, fixture.readiness, 1'250);
+            require(preserved &&
+                        preserved.value().front().preserveActiveMorph,
+                    "settling output-local override was not preserved");
+            tracker.commit(
+                current.owner, 5, preserved.value(), 1'250);
+            const auto continued = tracker.target(fixture.identity);
+            require(continued && continued->morph &&
+                        continued->successorGeneration == 5 &&
+                        continued->morph->state ==
+                            PresentationMorphState::Settling &&
+                        continued->morph->transitionId == "bottom-attach",
+                    "unrelated generation retired the settling override");
+            tracker.settleMorph(fixture.identity);
+            require(tracker.target(fixture.identity)->morph->state ==
+                        PresentationMorphState::Completed &&
+                        tracker.morphing().empty(),
+                    "settled output-local override was not retired");
+        }},
+        Case{"output-local morph endpoints are strict and target-sized", [] {
+            Fixture fixture;
+            fixture.current.targets.front() = layer(
+                "hgs:bar:DP-1", {12.0, 8.0, 776.0, 44.0}, 18.0);
+            fixture.replacement.targets.front() = layer(
+                "hgs:bar:DP-1", {0.0, 0.0, 800.0, 44.0}, 0.0);
+            fixture.replacement.handoffs.front().morph =
+                PresentationHandoffRequest::Morph{
+                    .transitionId = "bottom-attach",
+                    .durationMs = 240,
+                    .coordinateSpace =
+                        PresentationHandoffRequest::MorphCoordinateSpace::
+                            OutputLocal,
+                };
+            PresentationHandoffTracker tracker;
+            require(!tracker.prepare(
+                        fixture.current, fixture.replacement,
+                        fixture.readiness, 1'000),
+                    "missing output-local endpoints were accepted");
+            fixture.replacement.handoffs.front().morph->source =
+                PresentationHandoffRequest::MorphEndpoint{
+                    .rect = {12.0, 48.0, 775.0, 44.0},
+                    .radius = 18.0,
+                };
+            fixture.replacement.handoffs.front().morph->destination =
+                PresentationHandoffRequest::MorphEndpoint{
+                    .rect = {0.0, 56.0, 800.0, 44.0},
+                    .radius = 0.0,
+                };
+            require(!tracker.prepare(
+                        fixture.current, fixture.replacement,
+                        fixture.readiness, 1'000),
+                    "endpoint size inconsistent with its target was accepted");
+        }},
+        Case{"output-local settlement remains bounded by handoff timeout", [] {
+            Fixture fixture;
+            fixture.replacement.handoffs.front().morph =
+                PresentationHandoffRequest::Morph{
+                    .transitionId = "right-attach",
+                    .durationMs = 200,
+                    .coordinateSpace =
+                        PresentationHandoffRequest::MorphCoordinateSpace::
+                            OutputLocal,
+                    .source = PresentationHandoffRequest::MorphEndpoint{
+                        .rect = {48.0, 0.0, 800.0, 44.0},
+                        .radius = 18.0,
+                    },
+                    .destination =
+                        PresentationHandoffRequest::MorphEndpoint{
+                            .rect = {56.0, 0.0, 800.0, 44.0},
+                            .radius = 18.0,
+                        },
+                };
+            PresentationHandoffTracker tracker;
+            auto prepared = tracker.prepare(
+                fixture.current, fixture.replacement,
+                fixture.readiness, 100);
+            require(prepared.hasValue(), "bounded output-local morph failed");
+            tracker.commit(
+                fixture.current.owner, 4, prepared.value(), 100);
+            tracker.expire(300);
+            require(tracker.morphing().size() == 1U,
+                    "settlement override disappeared at animation completion");
+            tracker.expire(600);
+            require(tracker.morphing().empty() &&
+                        tracker.target(fixture.identity)->morph->state ==
+                            PresentationMorphState::Failed,
+                    "unsettled output-local override survived its lease");
+        }},
         Case{"morph rejects unsupported shape and excessive duration", [] {
             Fixture fixture;
             fixture.replacement.handoffs.front().morph =

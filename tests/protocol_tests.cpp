@@ -209,6 +209,76 @@ int main() {
             require(!unknown && unknown.error().path == "handoffs[0].secret",
                     "unknown handoff field bypassed strict parsing");
         }},
+        Case{"output-local morph endpoints parse without changing legacy morphs", [] {
+            const auto result = parseRequest(R"({
+                "version":2,"operation":"session.replace",
+                "session_id":"one","token":"two","generation":2,
+                "materials":{"fluid":{}},
+                "targets":[{
+                    "id":"bar","kind":"layer",
+                    "selector":{"namespace":"hgs:bar:DP-1"},
+                    "geometry":{"space":"surface-local","x":0,"y":0,"width":800,"height":44},
+                    "material":{"source":"session","name":"fluid"},
+                    "shape":{"kind":"rounded-rect","radius":0}
+                }],
+                "handoffs":[{
+                    "target_id":"bar","source_generation":1,
+                    "mode":"retain-until-drawn","timeout_ms":500,
+                    "morph":{
+                        "transition_id":"bottom-attach",
+                        "duration_ms":240,
+                        "easing":"ease-out-cubic",
+                        "anchor":"compositor-monotonic",
+                        "coordinate_space":"output-local",
+                        "source":{"rect":{"x":12,"y":48,"width":776,"height":44},"radius":18},
+                        "destination":{"rect":{"x":0,"y":56,"width":800,"height":44},"radius":0}
+                    }
+                }]
+            })");
+            require(result.hasValue(), "output-local morph failed parsing");
+            const auto& morph = *std::get<ReplaceSessionRequest>(
+                result.value().body).replacement.handoffs.front().morph;
+            require(morph.coordinateSpace ==
+                        PresentationHandoffRequest::MorphCoordinateSpace::
+                            OutputLocal &&
+                        morph.source &&
+                        morph.source->rect ==
+                            Rect{12.0, 48.0, 776.0, 44.0} &&
+                        morph.destination &&
+                        morph.destination->radius == 0.0,
+                    "output-local endpoint intent changed during parsing");
+
+            const auto missing = parseRequest(R"({
+                "version":2,"operation":"session.replace",
+                "session_id":"one","token":"two","generation":2,
+                "materials":{"fluid":{}},"targets":[],
+                "handoffs":[{"target_id":"bar","source_generation":1,
+                    "mode":"retain-until-drawn","timeout_ms":500,
+                    "morph":{"transition_id":"bad","duration_ms":200,
+                        "easing":"ease-out-cubic",
+                        "anchor":"compositor-monotonic",
+                        "coordinate_space":"output-local"}}]
+            })");
+            require(!missing &&
+                        missing.error().code == ErrorCode::InvalidRequest,
+                    "output-local morph without endpoints was accepted");
+
+            const auto leakedEndpoint = parseRequest(R"({
+                "version":2,"operation":"session.replace",
+                "session_id":"one","token":"two","generation":2,
+                "materials":{"fluid":{}},"targets":[],
+                "handoffs":[{"target_id":"bar","source_generation":1,
+                    "mode":"retain-until-drawn","timeout_ms":500,
+                    "morph":{"transition_id":"bad","duration_ms":200,
+                        "easing":"ease-out-cubic",
+                        "anchor":"compositor-monotonic",
+                        "source":{"rect":{"x":0,"y":0,"width":1,"height":1},"radius":0}}}]
+            })");
+            require(!leakedEndpoint &&
+                        leakedEndpoint.error().code ==
+                            ErrorCode::InvalidRequest,
+                    "surface-local morph accepted explicit endpoint fields");
+        }},
         Case{"compound shape", [] {
             const auto result = parseRequest(R"({
                 "version":2,"operation":"session.replace",

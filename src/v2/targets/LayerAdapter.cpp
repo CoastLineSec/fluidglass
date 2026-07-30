@@ -169,6 +169,7 @@ Result<std::optional<ResolvedAttachment>> resolveLayerAttachment(
             .kind = TargetKind::Layer,
             .objectToken = surface.objectToken,
             .globalGeometry = geometry,
+            .containerGlobalGeometry = surface.globalGeometry,
             .stage = *stage,
             .outputFilter = surface.output,
             .opacity = surface.opacity,

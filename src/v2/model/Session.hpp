@@ -30,9 +30,26 @@ struct SessionHandle {
 };
 
 struct PresentationHandoffRequest {
+    enum class MorphCoordinateSpace {
+        SurfaceLocal,
+        OutputLocal,
+    };
+
+    struct MorphEndpoint {
+        Rect   rect;
+        double radius = 0.0;
+
+        friend bool operator==(const MorphEndpoint&,
+                               const MorphEndpoint&) = default;
+    };
+
     struct Morph {
-        std::string   transitionId;
-        std::uint64_t durationMs = 0;
+        std::string                 transitionId;
+        std::uint64_t               durationMs = 0;
+        MorphCoordinateSpace        coordinateSpace =
+            MorphCoordinateSpace::SurfaceLocal;
+        std::optional<MorphEndpoint> source = std::nullopt;
+        std::optional<MorphEndpoint> destination = std::nullopt;
 
         friend bool operator==(const Morph&, const Morph&) = default;
     };

@@ -57,6 +57,6 @@ buildPresentationScene(
     std::span<const SessionSnapshot> sessions,
     std::span<const OutputGeneration> outputs,
     std::uint64_t nowMs,
-    const PresentationHandoffTracker* handoffs = nullptr);
+    PresentationHandoffTracker* handoffs = nullptr);
 
 } // namespace hfg::v2

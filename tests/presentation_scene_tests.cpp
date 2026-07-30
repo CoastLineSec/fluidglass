@@ -247,6 +247,249 @@ int main() {
                         shape->radius < 18.0,
                     "morph scene did not preserve envelope or interpolate intent");
         }},
+        Case{"bottom output-local morph stays fixed while its layer origin settles", [] {
+            const std::array sessions{session()};
+            const std::array outputs{output("DP-1", 0.0, 1)};
+            auto moving = target(
+                "client:demo:s1",
+                "bar",
+                MaterialSource::Session,
+                "local",
+                Rect{0.0, 40.0, 100.0, 44.0});
+            moving.definition.kind = TargetKind::Layer;
+            moving.definition.selector =
+                LayerSelector{.namespaceName = "hgs:bar:DP-1"};
+            moving.definition.geometry = Rect{0.0, 0.0, 100.0, 44.0};
+            moving.definition.shape = RoundedRectShape{.radius = 0.0};
+            moving.attachment.kind = TargetKind::Layer;
+            moving.attachment.stage = RenderStage::PostLayer;
+            moving.attachment.outputFilter = "DP-1";
+            moving.attachment.containerGlobalGeometry =
+                Rect{0.0, 40.0, 100.0, 60.0};
+            moving.definition.stage = RenderStage::PostLayer;
+            TargetScene targets{
+                .effective = {moving},
+                .inactive = {},
+                .suppressed = {},
+                .failures = {},
+            };
+            PresentationHandoffTracker tracker;
+            const PreparedPresentationHandoff prepared{
+                .identity = moving.attachment.identity,
+                .sourceGeneration = 1,
+                .timeoutMs = 500,
+                .presentations = {},
+                .morph = PreparedPresentationMorph{
+                    .transitionId = "bottom-attach",
+                    .coordinateSpace =
+                        PresentationHandoffRequest::MorphCoordinateSpace::
+                            OutputLocal,
+                    .source = {
+                        .rect = {12.0, 48.0, 76.0, 44.0},
+                        .radius = 18.0,
+                    },
+                    .destination = {
+                        .rect = {0.0, 56.0, 100.0, 44.0},
+                        .radius = 0.0,
+                    },
+                    .durationMs = 240,
+                },
+            };
+            tracker.commit(
+                moving.attachment.identity.owner,
+                2,
+                std::array{prepared},
+                1'000);
+            tracker.expire(1'240);
+
+            const auto completed = buildPresentationScene(
+                targets, nullptr, sessions, outputs, 1'240, &tracker);
+            require(completed &&
+                        completed.value().presentations.size() == 1U,
+                    "completed bottom morph stopped drawing");
+            const auto& override =
+                completed.value().presentations.front().target;
+            require(override.transitionActive &&
+                        override.attachment.globalGeometry ==
+                            Rect{0.0, 56.0, 100.0, 44.0} &&
+                        tracker.target(moving.attachment.identity)->morph->
+                            state == PresentationMorphState::Settling,
+                    "bottom destination jumped to the unsettled layer origin");
+
+            auto settledLayer = moving;
+            settledLayer.attachment.globalGeometry =
+                Rect{0.0, 56.0, 100.0, 44.0};
+            settledLayer.attachment.containerGlobalGeometry =
+                Rect{0.0, 56.0, 100.0, 44.0};
+            TargetScene settledTargets{
+                .effective = {settledLayer},
+                .inactive = {},
+                .suppressed = {},
+                .failures = {},
+            };
+            const auto settled = buildPresentationScene(
+                settledTargets, nullptr, sessions, outputs, 1'241, &tracker);
+            require(settled &&
+                        settled.value().presentations.size() == 1U &&
+                        !settled.value().presentations.front().target
+                             .transitionActive &&
+                        tracker.target(moving.attachment.identity)->morph->
+                            state == PresentationMorphState::Completed,
+                    "matching layer attachment did not retire the override");
+        }},
+        Case{"right output-local morph remains isolated to its output", [] {
+            const std::array sessions{session()};
+            const std::array outputs{
+                output("DP-1", 0.0, 1),
+                output("DP-2", 100.0, 2),
+            };
+            auto moving = target(
+                "client:demo:s1",
+                "bar",
+                MaterialSource::Session,
+                "local",
+                Rect{40.0, 0.0, 44.0, 100.0});
+            moving.definition.kind = TargetKind::Layer;
+            moving.definition.selector =
+                LayerSelector{.namespaceName = "hgs:bar:DP-1"};
+            moving.definition.geometry = Rect{0.0, 0.0, 44.0, 100.0};
+            moving.definition.shape = RoundedRectShape{.radius = 0.0};
+            moving.attachment.kind = TargetKind::Layer;
+            moving.attachment.stage = RenderStage::PostLayer;
+            moving.attachment.outputFilter = "DP-1";
+            moving.attachment.containerGlobalGeometry =
+                Rect{40.0, 0.0, 60.0, 100.0};
+            moving.definition.stage = RenderStage::PostLayer;
+            TargetScene targets{
+                .effective = {moving},
+                .inactive = {},
+                .suppressed = {},
+                .failures = {},
+            };
+            PresentationHandoffTracker tracker;
+            const PreparedPresentationHandoff prepared{
+                .identity = moving.attachment.identity,
+                .sourceGeneration = 1,
+                .timeoutMs = 500,
+                .presentations = {},
+                .morph = PreparedPresentationMorph{
+                    .transitionId = "right-attach",
+                    .coordinateSpace =
+                        PresentationHandoffRequest::MorphCoordinateSpace::
+                            OutputLocal,
+                    .source = {
+                        .rect = {48.0, 12.0, 44.0, 76.0},
+                        .radius = 18.0,
+                    },
+                    .destination = {
+                        .rect = {56.0, 0.0, 44.0, 100.0},
+                        .radius = 0.0,
+                    },
+                    .durationMs = 240,
+                },
+            };
+            tracker.commit(
+                moving.attachment.identity.owner,
+                2,
+                std::array{prepared},
+                1'000);
+            const auto scene = buildPresentationScene(
+                targets, nullptr, sessions, outputs, 1'120, &tracker);
+            require(scene && scene.value().presentations.size() == 1U &&
+                        scene.value().presentations.front().output.snapshot
+                                .name == "DP-1" &&
+                        scene.value().presentations.front().target
+                                .attachment.globalGeometry.x > 48.0 &&
+                        scene.value().presentations.front().target
+                                .attachment.globalGeometry.x < 56.0,
+                    "right morph crossed output ownership or jumped");
+        }},
+        Case{"output-local morph maps through a transformed portrait output once", [] {
+            const std::array sessions{session()};
+            const std::array outputs{
+                OutputGeneration{
+                    .snapshot = OutputSnapshot{
+                        .name = "DP-1",
+                        .objectToken = 9,
+                        .modeToken = 9,
+                        .bufferWidth = 60,
+                        .bufferHeight = 100,
+                        .logicalX = 20.0,
+                        .logicalY = 30.0,
+                        .logicalWidth = 100.0,
+                        .logicalHeight = 60.0,
+                        .scale = 1.0,
+                        .transform = OutputTransform::Rotate270,
+                        .renderFormat = 0x34325241U,
+                        .colorStateToken = 1,
+                    },
+                    .generation = 2,
+                },
+            };
+            auto moving = target(
+                "client:demo:s1",
+                "bar",
+                MaterialSource::Session,
+                "local",
+                Rect{60.0, 30.0, 44.0, 60.0});
+            moving.definition.kind = TargetKind::Layer;
+            moving.definition.selector =
+                LayerSelector{.namespaceName = "hgs:bar:DP-1"};
+            moving.definition.geometry = Rect{0.0, 0.0, 44.0, 60.0};
+            moving.definition.shape = RoundedRectShape{.radius = 0.0};
+            moving.attachment.kind = TargetKind::Layer;
+            moving.attachment.stage = RenderStage::PostLayer;
+            moving.attachment.outputFilter = "DP-1";
+            moving.attachment.containerGlobalGeometry =
+                Rect{60.0, 30.0, 60.0, 60.0};
+            moving.definition.stage = RenderStage::PostLayer;
+            TargetScene targets{
+                .effective = {moving},
+                .inactive = {},
+                .suppressed = {},
+                .failures = {},
+            };
+            PresentationHandoffTracker tracker;
+            const PreparedPresentationHandoff prepared{
+                .identity = moving.attachment.identity,
+                .sourceGeneration = 1,
+                .timeoutMs = 500,
+                .presentations = {},
+                .morph = PreparedPresentationMorph{
+                    .transitionId = "portrait-right",
+                    .coordinateSpace =
+                        PresentationHandoffRequest::MorphCoordinateSpace::
+                            OutputLocal,
+                    .source = {
+                        .rect = {48.0, 8.0, 44.0, 44.0},
+                        .radius = 18.0,
+                    },
+                    .destination = {
+                        .rect = {56.0, 0.0, 44.0, 60.0},
+                        .radius = 0.0,
+                    },
+                    .durationMs = 240,
+                },
+            };
+            tracker.commit(
+                moving.attachment.identity.owner,
+                2,
+                std::array{prepared},
+                1'000);
+            const auto scene = buildPresentationScene(
+                targets, nullptr, sessions, outputs, 1'120, &tracker);
+            require(scene && scene.value().presentations.size() == 1U,
+                    "transformed output-local morph did not plan");
+            const auto& planned = scene.value().presentations.front();
+            require(planned.output.snapshot.transform ==
+                        OutputTransform::Rotate270 &&
+                        planned.target.attachment.globalGeometry.x > 68.0 &&
+                        planned.target.attachment.globalGeometry.x < 76.0 &&
+                        planned.transitionEnvelope &&
+                        planned.transitionEnvelope->coverage.width > 0 &&
+                        planned.transitionEnvelope->coverage.height > 0,
+                    "output transform was skipped or applied before logical morphing");
+        }},
         Case{"missing material fails only its target", [] {
             const auto active = config();
             const std::array outputs{

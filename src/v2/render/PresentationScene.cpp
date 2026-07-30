@@ -4,6 +4,7 @@
 #include "v2/targets/MaterialResolver.hpp"
 #include "v2/targets/TargetMotion.hpp"
 
+#include <cmath>
 #include <iterator>
 #include <set>
 #include <string>
@@ -36,13 +37,15 @@ const OutputGeneration* findOutput(
 
 Result<ResolvedTarget> applyPresentationMorph(
     ResolvedTarget target,
-    const PresentationHandoffTracker* handoffs,
+    PresentationHandoffTracker* handoffs,
+    std::span<const OutputGeneration> outputs,
     std::uint64_t nowMs) {
     if (!handoffs)
         return Result<ResolvedTarget>::success(std::move(target));
     const auto record = handoffs->target(target.attachment.identity);
     if (!record || !record->morph ||
-        record->morph->state != PresentationMorphState::Active)
+        (record->morph->state != PresentationMorphState::Active &&
+         record->morph->state != PresentationMorphState::Settling))
         return Result<ResolvedTarget>::success(std::move(target));
     if (target.attachment.kind != TargetKind::Layer ||
         !target.definition.geometry ||
@@ -57,18 +60,108 @@ Result<ResolvedTarget> applyPresentationMorph(
     if (!resolved)
         return Result<ResolvedTarget>::failure(resolved.error());
     const auto destination = *target.definition.geometry;
-    const auto originX =
+    const auto surfaceOriginX =
         target.attachment.globalGeometry.x - destination.x;
-    const auto originY =
+    const auto surfaceOriginY =
         target.attachment.globalGeometry.y - destination.y;
-    const auto global = [originX, originY](const Rect& rect) {
+    const auto coordinateSpace = record->morph->coordinateSpace;
+    const OutputGeneration* output = nullptr;
+    if (coordinateSpace ==
+        PresentationHandoffRequest::MorphCoordinateSpace::OutputLocal) {
+        if (!target.attachment.outputFilter)
+            return Result<ResolvedTarget>::failure({
+                .code = ErrorCode::UnresolvedTarget,
+                .path = "presentation.morph.output",
+                .message = "output-local morph has no resolved output",
+            });
+        const auto found = std::ranges::find(
+            outputs,
+            *target.attachment.outputFilter,
+            [](const OutputGeneration& candidate) {
+                return candidate.snapshot.name;
+            });
+        if (found == outputs.end())
+            return Result<ResolvedTarget>::failure({
+                .code = ErrorCode::StaleGeneration,
+                .path = "presentation.morph.output",
+                .message = "output-local morph references a non-current output",
+            });
+        output = &*found;
+    }
+    const auto global = [&](const Rect& rect) {
+        if (output)
+            return Rect{
+                .x = output->snapshot.logicalX + rect.x,
+                .y = output->snapshot.logicalY + rect.y,
+                .width = rect.width,
+                .height = rect.height,
+            };
         return Rect{
-            .x = originX + rect.x,
-            .y = originY + rect.y,
+            .x = surfaceOriginX + rect.x,
+            .y = surfaceOriginY + rect.y,
             .width = rect.width,
             .height = rect.height,
         };
     };
+    const auto contains = [](const Rect& bounds, const Rect& rect) {
+        constexpr double EPSILON = 0.001;
+        return rect.x >= bounds.x - EPSILON &&
+            rect.y >= bounds.y - EPSILON &&
+            rect.x + rect.width <=
+                bounds.x + bounds.width + EPSILON &&
+            rect.y + rect.height <=
+                bounds.y + bounds.height + EPSILON;
+    };
+    const auto intersects = [](const Rect& left, const Rect& right) {
+        return left.x < right.x + right.width &&
+            left.x + left.width > right.x &&
+            left.y < right.y + right.height &&
+            left.y + left.height > right.y;
+    };
+    const auto nearlyEqual = [](const Rect& left, const Rect& right) {
+        constexpr double EPSILON = 0.001;
+        return std::abs(left.x - right.x) <= EPSILON &&
+            std::abs(left.y - right.y) <= EPSILON &&
+            std::abs(left.width - right.width) <= EPSILON &&
+            std::abs(left.height - right.height) <= EPSILON;
+    };
+    if (output) {
+        const Rect outputBounds{
+            .x = output->snapshot.logicalX,
+            .y = output->snapshot.logicalY,
+            .width = output->snapshot.logicalWidth,
+            .height = output->snapshot.logicalHeight,
+        };
+        const auto currentGlobal = global(resolved.value().current.rect);
+        const auto envelopeGlobal = global(resolved.value().envelope);
+        if (!contains(outputBounds, currentGlobal) ||
+            !contains(outputBounds, envelopeGlobal))
+            return Result<ResolvedTarget>::failure({
+                .code = ErrorCode::InvalidTarget,
+                .path = "presentation.morph.output",
+                .message = "output-local morph is outside its output",
+            });
+        if (!target.attachment.containerGlobalGeometry ||
+            !intersects(*target.attachment.containerGlobalGeometry,
+                        currentGlobal))
+            return Result<ResolvedTarget>::failure({
+                .code = ErrorCode::UnresolvedTarget,
+                .path = "presentation.morph.surface",
+                .message = "output-local morph does not intersect its live layer surface",
+            });
+        const auto destinationGlobal =
+            global(record->morph->destination.rect);
+        const auto destinationMatches =
+            nearlyEqual(target.attachment.globalGeometry,
+                        destinationGlobal) &&
+            std::get<RoundedRectShape>(target.definition.shape).radius ==
+                record->morph->destination.radius;
+        if (resolved.value().progress >= 1.0 &&
+            destinationMatches) {
+            handoffs->settleMorph(target.attachment.identity);
+            return Result<ResolvedTarget>::success(std::move(target));
+        }
+    }
     target.definition.geometry = resolved.value().current.rect;
     target.definition.shape = RoundedRectShape{
         .radius = resolved.value().current.radius,
@@ -79,7 +172,8 @@ Result<ResolvedTarget> applyPresentationMorph(
         global(resolved.value().envelope);
     target.transitionAnchorMs = record->morph->anchorMs;
     target.transitionActive =
-        target.transitionActive || resolved.value().active;
+        target.transitionActive || resolved.value().active ||
+        record->morph->state == PresentationMorphState::Settling;
     return Result<ResolvedTarget>::success(std::move(target));
 }
 
@@ -92,7 +186,7 @@ buildPresentationScene(
     std::span<const SessionSnapshot> sessions,
     std::span<const OutputGeneration> outputs,
     std::uint64_t nowMs,
-    const PresentationHandoffTracker* handoffs) {
+    PresentationHandoffTracker* handoffs) {
     if (targets.effective.size() >
         Limits::MAX_COMPOSITOR_OBJECTS)
         return failure(
@@ -164,6 +258,7 @@ buildPresentationScene(
         movingTarget = applyPresentationMorph(
             std::move(movingTarget.value()),
             handoffs,
+            outputs,
             nowMs);
         if (!movingTarget) {
             scene.failures.push_back({

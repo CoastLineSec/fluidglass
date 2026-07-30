@@ -182,6 +182,9 @@ int main() {
                         result["result"]["presentation_handoffs"]
                               ["geometry_morph"]["layer_targets"] == true &&
                         result["result"]["presentation_handoffs"]
+                              ["geometry_morph"]["coordinate_spaces"] ==
+                            json::array({"surface-local", "output-local"}) &&
+                        result["result"]["presentation_handoffs"]
                               ["geometry_morph"]["reversal"] == true &&
                         result["result"]["limits"]
                               ["presentation_handoff_ms"] == 2000 &&
