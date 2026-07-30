@@ -98,6 +98,10 @@ Response fields include:
       "targets": true,
       "compound_parts": true
     },
+    "presentation_handoffs": {
+      "retain_until_drawn": true,
+      "target_kinds": ["layer"]
+    },
     "operations": [
       "capabilities",
       "status",
@@ -119,7 +123,8 @@ Response fields include:
       "compound_parts": 32,
       "compound_connectors": 32,
       "bezier_segments": 16,
-      "transition_ms": 60000
+      "transition_ms": 60000,
+      "presentation_handoff_ms": 2000
     }
   }
 }
@@ -235,6 +240,30 @@ Rules:
 - a failure preserves the previous generation byte-for-byte;
 - replayed, skipped, or stale generations are rejected;
 - a successful empty replacement clears only this session's state.
+
+A client may request bounded continuity for a currently drawn layer target while
+submitting its successor geometry:
+
+```json
+{
+  "handoffs": [
+    {
+      "target_id": "primary-bar",
+      "source_generation": 1,
+      "mode": "retain-until-drawn",
+      "timeout_ms": 750
+    }
+  ]
+}
+```
+
+Clients must send `handoffs` only when
+`presentation_handoffs.retain_until_drawn` is advertised and the target kind is
+listed. Every requested predecessor must be drawn in the exact current
+generation and the successor replacement must retain its target id and layer
+namespace. A failed handoff request rejects the replacement and preserves the
+current generation. A successful replacement reports accepted handoffs
+separately from target readiness.
 
 Material fields use the same schema as the
 [Lua configuration](lua-configuration.md#material-definitions).
@@ -627,7 +656,9 @@ errors. It does not include window titles or raw selectors.
 
 The session token is required because inspection can expose selector and
 attachment information. The response includes definition state, resolution
-state, presentation keys, readiness, and the latest sanitized failure.
+state, presentation keys, readiness, the optional `handoff` state, and the
+latest sanitized failure. Handoff state is `retained`, `completed`, or
+`failed`; a retained predecessor never counts as current-generation `drawn`.
 
 ## Readiness inspection
 

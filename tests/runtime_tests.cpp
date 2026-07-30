@@ -132,6 +132,34 @@ std::string compoundReplacement(std::string_view sessionId, std::string_view tok
     })";
 }
 
+std::string layerReplacement(
+    std::string_view sessionId,
+    std::string_view token,
+    std::uint64_t generation,
+    bool handoff = false,
+    std::uint64_t sourceGeneration = 0) {
+    return std::string(R"({
+        "version":2,
+        "operation":"session.replace",
+        "session_id":")") + std::string(sessionId) +
+        R"(","token":")" + std::string(token) +
+        R"(","generation":)" + std::to_string(generation) +
+        R"(,"materials":{"glass":{}},"targets":[{
+            "id":"bar","kind":"layer",
+            "selector":{"namespace":"hgs:bar:DP-1"},
+            "geometry":{"space":"surface-local","x":0,"y":0,"width":800,"height":44},
+            "material":{"source":"session","name":"glass"},
+            "shape":{"kind":"rounded-rect","radius":18}
+        }])" +
+        (handoff
+             ? std::string(R"(,"handoffs":[{
+                    "target_id":"bar","source_generation":)") +
+                   std::to_string(sourceGeneration) +
+                   R"(,"mode":"retain-until-drawn","timeout_ms":500}])"
+             : std::string{}) +
+        "}";
+}
+
 } // namespace
 
 int main() {
@@ -147,6 +175,13 @@ int main() {
             require(result["result"]["limits"]["transition_ms"] == 60000, "transition limit is missing");
             require(result["result"]["transitions"]["compound_parts"] == true,
                     "part transitions are not advertised");
+            require(result["result"]["presentation_handoffs"]
+                              ["retain_until_drawn"] == true &&
+                        result["result"]["presentation_handoffs"]
+                              ["target_kinds"] == json::array({"layer"}) &&
+                        result["result"]["limits"]
+                              ["presentation_handoff_ms"] == 2000,
+                    "presentation handoff capability is incomplete");
         }},
         Case{"capabilities and status report the live renderer truthfully", [] {
             Fixture fixture;
@@ -214,6 +249,8 @@ int main() {
             const auto status = call(fixture.runtime, R"({"version":2,"operation":"status"})", 11);
             require(status["result"]["totals"]["sessions"] == 1, "status lost the session");
             require(status["result"]["readiness"]["accepted"] == 1, "accepted target readiness is missing");
+            require(status["result"]["presentation_handoffs"].empty(),
+                    "ordinary replacement reported a handoff");
             require(status.dump().find(token) == std::string::npos, "status leaked a session token");
 
             const auto heartbeat = call(fixture.runtime, std::string(
@@ -252,6 +289,99 @@ int main() {
                 sessionId + R"(","token":"wrong","target_id":"bar"})");
             require(denied["ok"] == false, "wrong inspection token was accepted");
             require(denied["error"]["code"] == "invalid-token", "wrong inspection error code");
+        }},
+        Case{"handoff retention is separate from successor readiness", [] {
+            Fixture fixture;
+            const auto opened = open(fixture.runtime);
+            const auto sessionId =
+                opened["result"]["session_id"].get<std::string>();
+            const auto token = opened["result"]["token"].get<std::string>();
+            require(call(fixture.runtime,
+                         layerReplacement(sessionId, token, 1), 10)["ok"] ==
+                        true,
+                    "initial layer replacement failed");
+            const auto snapshot = fixture.runtime.sessionManager().snapshot(
+                sessionId);
+            require(snapshot.has_value(), "session snapshot is unavailable");
+            const TargetIdentity identity{
+                .owner = snapshot->owner,
+                .targetId = "bar",
+            };
+            const PresentationKey key{
+                .identity = identity,
+                .output = "DP-1",
+                .outputGeneration = 9,
+                .stage = RenderStage::PostLayer,
+            };
+            auto& readiness = fixture.runtime.readinessTracker();
+            require(readiness.resolvePresentation(key).hasValue() &&
+                        readiness.transition(key, ReadinessState::Attached)
+                            .hasValue() &&
+                        readiness.transition(key,
+                                             ReadinessState::CaptureReady)
+                            .hasValue() &&
+                        readiness.transition(key, ReadinessState::Drawn)
+                            .hasValue(),
+                    "predecessor did not reach drawn");
+
+            const auto replaced = call(
+                fixture.runtime,
+                layerReplacement(sessionId, token, 2, true, 1), 20);
+            require(replaced["ok"] == true &&
+                        replaced["result"]["handoffs"].size() == 1U &&
+                        replaced["result"]["handoffs"][0]["state"] ==
+                            "retained",
+                    "runtime did not accept the exact drawn predecessor");
+            const auto inspect = call(
+                fixture.runtime,
+                std::string(
+                    R"({"version":2,"operation":"target.inspect","session_id":")") +
+                    sessionId + R"(","token":")" + token +
+                    R"(","target_id":"bar"})",
+                21);
+            require(inspect["result"]["state"] == "accepted" &&
+                        inspect["result"]["presentations"].empty() &&
+                        inspect["result"]["handoff"]["state"] == "retained",
+                    "retained fallback was reported as successor readiness");
+
+            fixture.runtime.handoffTracker().complete(key);
+            const auto status = call(
+                fixture.runtime,
+                R"({"version":2,"operation":"status"})",
+                22);
+            require(status["result"]["readiness"]["accepted"] == 1 &&
+                        status["result"]["presentation_handoffs"]
+                              ["completed"] == 1,
+                    "status merged continuity into readiness");
+            const auto completed = call(
+                fixture.runtime,
+                std::string(
+                    R"({"version":2,"operation":"target.inspect","session_id":")") +
+                    sessionId + R"(","token":")" + token +
+                    R"(","target_id":"bar"})",
+                23);
+            require(completed["result"]["handoff"]["state"] == "completed",
+                    "successor draw did not complete the handoff");
+        }},
+        Case{"rejected handoff preserves the authoritative generation", [] {
+            Fixture fixture;
+            const auto opened = open(fixture.runtime);
+            const auto sessionId =
+                opened["result"]["session_id"].get<std::string>();
+            const auto token = opened["result"]["token"].get<std::string>();
+            require(call(fixture.runtime,
+                         layerReplacement(sessionId, token, 1), 10)["ok"] ==
+                        true,
+                    "initial layer replacement failed");
+            const auto rejected = call(
+                fixture.runtime,
+                layerReplacement(sessionId, token, 2, true, 0), 20);
+            require(rejected["ok"] == false &&
+                        rejected["error"]["code"] == "stale-generation" &&
+                        fixture.runtime.sessionManager()
+                                .snapshot(sessionId)
+                                ->generation == 1,
+                    "rejected handoff changed the authoritative generation");
         }},
         Case{"compound inspection is lossless", [] {
             Fixture fixture;

@@ -21,6 +21,7 @@ struct GlassDrawFailure {
 struct GlassRenderScene {
   std::vector<CaptureResource> resources;
   std::vector<GlassDrawPlan> draws;
+  std::vector<PresentationHandoffPair> handoffs = {};
   std::vector<TargetIdentity> inactive;
   std::vector<TargetIdentity> suppressed;
   std::vector<TargetResolutionFailure> targetFailures;

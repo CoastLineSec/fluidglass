@@ -74,6 +74,7 @@ Result<CaptureScene> buildCaptureScene(
     CaptureScene scene{
         .captures = {},
         .assignments = {},
+        .handoffs = presentations.handoffs,
         .inactive = presentations.inactive,
         .suppressed = presentations.suppressed,
         .targetFailures = presentations.failures,

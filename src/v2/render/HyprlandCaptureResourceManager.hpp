@@ -46,7 +46,8 @@ class HyprlandCaptureResourceManager {
     [[nodiscard]] Result<CaptureResourceReconcileResult>
     reconcile(
         std::span<const CapturePlan> desired,
-        std::uint64_t maxTotalBytes);
+        std::uint64_t maxTotalBytes,
+        std::span<const std::uint64_t> retainedTokens = {});
 
     void clear() noexcept;
 

@@ -882,6 +882,7 @@ Result<Request> parseDocument(const json& document) {
             .generation = generation.value(),
             .materials = {},
             .targets = {},
+            .handoffs = {},
         };
         const auto materials = document.find("materials");
         if (materials == document.end() || !materials->is_object())
@@ -904,11 +905,73 @@ Result<Request> parseDocument(const json& document) {
             if (!target) return Result<Request>::failure(target.error());
             replacement.targets.push_back(std::move(target.value()));
         }
+
+        if (const auto handoffs = document.find("handoffs");
+            handoffs != document.end()) {
+            if (!handoffs->is_array())
+                return invalid<Request>(
+                    ErrorCode::InvalidRequest,
+                    "handoffs",
+                    "handoffs must be an array");
+            if (handoffs->size() > Limits::MAX_TARGETS_PER_SESSION)
+                return invalid<Request>(
+                    ErrorCode::ResourceLimited,
+                    "handoffs",
+                    "handoff limit exceeded");
+            for (std::size_t index = 0; index < handoffs->size(); ++index) {
+                const auto& value = (*handoffs)[index];
+                const auto path = "handoffs[" + std::to_string(index) + "]";
+                if (!value.is_object())
+                    return invalid<Request>(
+                        ErrorCode::InvalidRequest,
+                        path,
+                        "handoff must be an object");
+                if (auto error = rejectUnknown(
+                        value,
+                        {"target_id", "source_generation", "mode", "timeout_ms"},
+                        path))
+                    return Result<Request>::failure(std::move(*error));
+                const auto targetId = requiredString(
+                    value,
+                    "target_id",
+                    path + ".target_id");
+                const auto sourceGeneration = requiredUnsigned(
+                    value,
+                    "source_generation",
+                    path + ".source_generation");
+                const auto mode = requiredString(
+                    value,
+                    "mode",
+                    path + ".mode");
+                const auto timeoutMs = requiredUnsigned(
+                    value,
+                    "timeout_ms",
+                    path + ".timeout_ms");
+                if (!targetId)
+                    return Result<Request>::failure(targetId.error());
+                if (!sourceGeneration)
+                    return Result<Request>::failure(sourceGeneration.error());
+                if (!mode)
+                    return Result<Request>::failure(mode.error());
+                if (!timeoutMs)
+                    return Result<Request>::failure(timeoutMs.error());
+                if (mode.value() != "retain-until-drawn")
+                    return invalid<Request>(
+                        ErrorCode::UnsupportedOperation,
+                        path + ".mode",
+                        "handoff mode must be retain-until-drawn");
+                replacement.handoffs.push_back({
+                    .targetId = targetId.value(),
+                    .sourceGeneration = sourceGeneration.value(),
+                    .timeoutMs = timeoutMs.value(),
+                });
+            }
+        }
         return finish(ReplaceSessionRequest{
             .sessionId = sessionId.value(),
             .token = token.value(),
             .replacement = std::move(replacement),
-        }, {"session_id", "token", "generation", "materials", "targets"});
+        }, {"session_id", "token", "generation", "materials", "targets", "handoffs"});
     }
     if (operation.value() == "session.heartbeat") {
         const auto sessionId = requiredString(document, "session_id", "session_id");

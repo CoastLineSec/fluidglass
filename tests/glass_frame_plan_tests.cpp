@@ -318,5 +318,76 @@ int main() {
                          result.error().path == "scene.draws[0].capture.key",
                      "mismatched draw identity reached a frame");
            }},
+      Case{"handoff schedules successor first and fallback only as reserve",
+           [] {
+             auto successor = draw(7);
+             auto fallback = draw(8);
+             fallback.key.identity.targetId = "surface.handoff.1";
+             fallback.destination = {90.0, 70.0, 270.0, 150.0};
+             fallback.destinationPixels = fallback.destination;
+             fallback.damageCoverage = {90, 70, 270, 150};
+             fallback.capture.region = {90, 70, 270, 150};
+             fallback.capture.pixelCount = 40500;
+             fallback.capture.byteCount = 162000;
+             fallback.captureDamageCoverage = fallback.capture.region;
+             GlassRenderScene input{
+                 .resources = {
+                     {.token = 7, .plan = successor.capture},
+                     {.token = 8, .plan = fallback.capture},
+                 },
+                 .draws = {successor, fallback},
+                 .handoffs = {{
+                     .successor = successor.key,
+                     .fallback = fallback.key,
+                 }},
+                 .inactive = {},
+                 .suppressed = {},
+                 .targetFailures = {},
+                 .captureFailures = {},
+                 .drawFailures = {},
+             };
+             const auto result = planGlassFrame(input, event(), {});
+             require(result.hasValue() &&
+                         result.value().drawIndices ==
+                             std::vector<std::size_t>{0} &&
+                         result.value().fallbackDrawIndices ==
+                             std::vector<std::optional<std::size_t>>{1U} &&
+                         result.value().captureTokens ==
+                             std::vector<std::uint64_t>{7} &&
+                         result.value().renderDamage ==
+                             std::vector{
+                                 successor.damageCoverage,
+                                 fallback.damageCoverage,
+                             } &&
+                         result.value().continuationDamage.empty(),
+                     "handoff did not preserve one authoritative draw with one fallback");
+           }},
+      Case{"handoff rejects missing or cross-output fallback",
+           [] {
+             auto successor = draw(7);
+             auto input = scene(successor);
+             input.handoffs = {{
+                 .successor = successor.key,
+                 .fallback = PresentationKey{
+                     .identity = {.owner = "client:test:s1",
+                                  .targetId = "missing"},
+                     .output = "DP-1",
+                     .outputGeneration = 2,
+                     .stage = RenderStage::PostWindows,
+                 },
+             }};
+             require(!planGlassFrame(input, event(), {}),
+                     "missing fallback reached a frame");
+
+             auto fallback = draw(8);
+             fallback.key.identity.targetId = "fallback";
+             fallback.key.output = "DP-2";
+             fallback.capture.key.output = "DP-2";
+             input.resources.push_back({.token = 8, .plan = fallback.capture});
+             input.draws.push_back(fallback);
+             input.handoffs.front().fallback = fallback.key;
+             require(!planGlassFrame(input, event(), {}),
+                     "cross-output fallback reached a frame");
+           }},
   });
 }

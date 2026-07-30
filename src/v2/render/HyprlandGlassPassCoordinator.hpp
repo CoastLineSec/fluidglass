@@ -39,6 +39,9 @@ public:
   virtual void onDrawResult(const PresentationKey &key,
                             std::uint64_t frameToken,
                             const std::optional<Error> &error) noexcept = 0;
+  virtual void onHandoffFallbackFailure(
+      const PresentationKey &successor, std::uint64_t frameToken,
+      const Error &error) noexcept = 0;
 };
 
 class HyprlandGlassPassCoordinator {

@@ -1,10 +1,12 @@
 #include "v2/render/HyprlandCaptureResourceManager.hpp"
 
+#include "v2/core/Limits.hpp"
 #include "v2/render/CaptureResourcePlan.hpp"
 
 #include <algorithm>
 #include <limits>
 #include <optional>
+#include <set>
 #include <string>
 #include <utility>
 
@@ -40,11 +42,58 @@ Error allocationError(
 Result<CaptureResourceReconcileResult>
 HyprlandCaptureResourceManager::reconcile(
     std::span<const CapturePlan> desired,
-    std::uint64_t maxTotalBytes) {
+    std::uint64_t maxTotalBytes,
+    std::span<const std::uint64_t> retainedTokens) {
+    const auto current = resources();
+    if (retainedTokens.size() > current.size() ||
+        retainedTokens.size() + desired.size() >
+            Limits::MAX_CAPTURE_REQUESTS)
+        return failure<CaptureResourceReconcileResult>(
+            ErrorCode::ResourceLimited,
+            "retained_tokens",
+            "retained and desired capture count exceeds the supported limit");
+
+    std::set<std::uint64_t> uniqueRetained;
+    std::uint64_t retainedBytes = 0;
+    std::vector<CaptureResource> available;
+    available.reserve(current.size());
+    for (const auto token : retainedTokens) {
+        if (token == 0U || !uniqueRetained.insert(token).second)
+            return failure<CaptureResourceReconcileResult>(
+                ErrorCode::InvalidRequest,
+                "retained_tokens",
+                "retained capture tokens must be non-zero and unique");
+        const auto found = std::ranges::find_if(
+            current,
+            [token](const CaptureResource& resource) {
+                return resource.token == token;
+            });
+        if (found == current.end())
+            return failure<CaptureResourceReconcileResult>(
+                ErrorCode::StaleGeneration,
+                "retained_tokens",
+                "retained capture token is no longer allocated");
+        if (found->plan.byteCount >
+            std::numeric_limits<std::uint64_t>::max() - retainedBytes)
+            return failure<CaptureResourceReconcileResult>(
+                ErrorCode::ResourceLimited,
+                "retained_tokens",
+                "retained capture byte total overflows");
+        retainedBytes += found->plan.byteCount;
+    }
+    for (const auto& resource : current)
+        if (!uniqueRetained.contains(resource.token))
+            available.push_back(resource);
+    if (retainedBytes >= maxTotalBytes)
+        return failure<CaptureResourceReconcileResult>(
+            ErrorCode::ResourceLimited,
+            "retained_tokens",
+            "retained captures leave no budget for desired captures");
+
     auto resourcePlan = planCaptureResources(
-        resources(),
+        available,
         desired,
-        maxTotalBytes);
+        maxTotalBytes - retainedBytes);
     if (!resourcePlan)
         return Result<CaptureResourceReconcileResult>::failure(
             resourcePlan.error());

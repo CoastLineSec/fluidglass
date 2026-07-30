@@ -29,10 +29,20 @@ struct SessionHandle {
     friend bool operator==(const SessionHandle&, const SessionHandle&) = default;
 };
 
+struct PresentationHandoffRequest {
+    std::string   targetId;
+    std::uint64_t sourceGeneration = 0;
+    std::uint64_t timeoutMs = 0;
+
+    friend bool operator==(const PresentationHandoffRequest&,
+                           const PresentationHandoffRequest&) = default;
+};
+
 struct SessionReplacement {
     std::uint64_t                generation = 0;
     std::map<std::string, Material> materials;
     std::vector<Target>          targets;
+    std::vector<PresentationHandoffRequest> handoffs = {};
 };
 
 struct SessionSnapshot {

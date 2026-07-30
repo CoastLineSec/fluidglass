@@ -53,6 +53,7 @@ buildGlassRenderScene(const CaptureScene &captures,
   GlassRenderScene result{
       .resources = {},
       .draws = {},
+      .handoffs = captures.handoffs,
       .inactive = captures.inactive,
       .suppressed = captures.suppressed,
       .targetFailures = captures.targetFailures,

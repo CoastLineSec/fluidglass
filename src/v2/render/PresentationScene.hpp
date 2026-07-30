@@ -28,8 +28,17 @@ struct PlannedPresentation {
         const PlannedPresentation&) = default;
 };
 
+struct PresentationHandoffPair {
+    PresentationKey successor;
+    PresentationKey fallback;
+
+    friend bool operator==(const PresentationHandoffPair&,
+                           const PresentationHandoffPair&) = default;
+};
+
 struct PresentationScene {
     std::vector<PlannedPresentation>     presentations;
+    std::vector<PresentationHandoffPair> handoffs = {};
     std::vector<TargetIdentity>          inactive;
     std::vector<TargetIdentity>          suppressed;
     std::vector<TargetResolutionFailure> failures;

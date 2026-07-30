@@ -135,6 +135,57 @@ int main() {
             require(targets[0].kind == TargetKind::Window, "window kind changed");
             require(targets[1].kind == TargetKind::Layer, "layer kind changed");
         }},
+        Case{"presentation handoff request is additive and strict", [] {
+            const auto result = parseRequest(R"({
+                "version":2,"operation":"session.replace",
+                "session_id":"one","token":"two","generation":2,
+                "materials":{"fluid":{}},
+                "targets":[{
+                    "id":"bar","kind":"layer",
+                    "selector":{"namespace":"hgs:bar:DP-1"},
+                    "geometry":{"space":"surface-local","x":0,"y":0,"width":800,"height":44},
+                    "material":{"source":"session","name":"fluid"},
+                    "shape":{"kind":"rounded-rect","radius":18}
+                }],
+                "handoffs":[{
+                    "target_id":"bar",
+                    "source_generation":1,
+                    "mode":"retain-until-drawn",
+                    "timeout_ms":500
+                }]
+            })");
+            require(result.hasValue(), "valid handoff request failed");
+            const auto& handoffs = std::get<ReplaceSessionRequest>(
+                result.value().body).replacement.handoffs;
+            require(handoffs.size() == 1U &&
+                        handoffs.front().targetId == "bar" &&
+                        handoffs.front().sourceGeneration == 1U &&
+                        handoffs.front().timeoutMs == 500U,
+                    "handoff fields changed during parsing");
+
+            const auto unsupported = parseRequest(R"({
+                "version":2,"operation":"session.replace",
+                "session_id":"one","token":"two","generation":2,
+                "materials":{"fluid":{}},"targets":[],
+                "handoffs":[{"target_id":"bar","source_generation":1,
+                    "mode":"cross-fade","timeout_ms":500}]
+            })");
+            require(!unsupported &&
+                        unsupported.error().code ==
+                            ErrorCode::UnsupportedOperation,
+                    "unsupported handoff mode was accepted");
+
+            const auto unknown = parseRequest(R"({
+                "version":2,"operation":"session.replace",
+                "session_id":"one","token":"two","generation":2,
+                "materials":{"fluid":{}},"targets":[],
+                "handoffs":[{"target_id":"bar","source_generation":1,
+                    "mode":"retain-until-drawn","timeout_ms":500,
+                    "secret":"value"}]
+            })");
+            require(!unknown && unknown.error().path == "handoffs[0].secret",
+                    "unknown handoff field bypassed strict parsing");
+        }},
         Case{"compound shape", [] {
             const auto result = parseRequest(R"({
                 "version":2,"operation":"session.replace",

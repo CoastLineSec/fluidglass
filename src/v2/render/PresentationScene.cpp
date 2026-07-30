@@ -81,6 +81,7 @@ buildPresentationScene(
 
     PresentationScene scene{
         .presentations = {},
+        .handoffs = {},
         .inactive = targets.inactive,
         .suppressed = targets.suppressed,
         .failures = targets.failures,

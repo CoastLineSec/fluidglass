@@ -79,6 +79,7 @@ add_library(hyprfluidglass-v2-core STATIC
     src/v2/ipc/Protocol.cpp
     src/v2/model/Config.cpp
     src/v2/model/Material.cpp
+    src/v2/model/PresentationHandoff.cpp
     src/v2/model/Readiness.cpp
     src/v2/model/Session.cpp
     src/v2/model/Target.cpp
@@ -220,6 +221,12 @@ if(BUILD_TESTING)
     target_link_libraries(hyprfluidglass-readiness-tests PRIVATE hyprfluidglass-v2-core)
     target_compile_options(hyprfluidglass-readiness-tests PRIVATE -Wall -Wextra -Wpedantic)
     add_test(NAME hyprfluidglass-readiness COMMAND hyprfluidglass-readiness-tests)
+
+    add_executable(hyprfluidglass-presentation-handoff-tests tests/presentation_handoff_tests.cpp)
+    target_include_directories(hyprfluidglass-presentation-handoff-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+    target_link_libraries(hyprfluidglass-presentation-handoff-tests PRIVATE hyprfluidglass-v2-core)
+    target_compile_options(hyprfluidglass-presentation-handoff-tests PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME hyprfluidglass-presentation-handoff COMMAND hyprfluidglass-presentation-handoff-tests)
 
     add_executable(hyprfluidglass-output-generation-tests tests/output_generation_tests.cpp)
     target_include_directories(hyprfluidglass-output-generation-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests")

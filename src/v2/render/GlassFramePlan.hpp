@@ -6,6 +6,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -14,6 +15,7 @@ namespace hfg::v2 {
 struct GlassFramePlan {
   std::vector<std::uint64_t> captureTokens;
   std::vector<std::size_t> drawIndices;
+  std::vector<std::optional<std::size_t>> fallbackDrawIndices;
   std::vector<PixelRect> renderDamage;
   std::vector<Rect> continuationDamage;
   bool blockDirectScanout = false;

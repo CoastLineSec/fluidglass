@@ -95,6 +95,16 @@ Result<GlassFramePlan> planGlassFrame(const GlassRenderScene &scene,
 
   GlassFramePlan result;
   std::set<std::uint64_t> selectedCaptures;
+  std::map<PresentationKey, PresentationKey> handoffs;
+  std::set<PresentationKey> fallbackKeys;
+  for (std::size_t index = 0; index < scene.handoffs.size(); ++index) {
+    const auto &handoff = scene.handoffs[index];
+    if (!handoffs.emplace(handoff.successor, handoff.fallback).second ||
+        !fallbackKeys.insert(handoff.fallback).second)
+      return failure(ErrorCode::InvalidRequest,
+                     "scene.handoffs[" + std::to_string(index) + "]",
+                     "handoff presentation keys must be unique");
+  }
   for (std::size_t index = 0; index < scene.draws.size(); ++index) {
     const auto &draw = scene.draws[index];
     if (draw.key.output != event.output.snapshot.name ||
@@ -109,6 +119,8 @@ Result<GlassFramePlan> planGlassFrame(const GlassRenderScene &scene,
                      "draw and capture identities differ");
     if (draw.key.stage != stage ||
         draw.capture.key.stageObjectToken != event.stageObjectToken)
+      continue;
+    if (fallbackKeys.contains(draw.key))
       continue;
     if (!validDamage(draw.damageCoverage, outputSize.value()) ||
         !validDamage(draw.captureDamageCoverage, outputSize.value()))
@@ -127,10 +139,12 @@ Result<GlassFramePlan> planGlassFrame(const GlassRenderScene &scene,
         std::ranges::any_of(frameDamage, [&](const PixelRect &rect) {
           return intersects(rect, draw.captureDamageCoverage);
         });
-    if (!damaged && !draw.transitionActive)
+    const auto handoff = handoffs.find(draw.key);
+    if (!damaged && !draw.transitionActive && handoff == handoffs.end())
       continue;
 
     result.drawIndices.push_back(index);
+    result.fallbackDrawIndices.push_back(std::nullopt);
     result.renderDamage.push_back(draw.damageCoverage);
     if (selectedCaptures.insert(draw.resourceToken).second)
       result.captureTokens.push_back(draw.resourceToken);
@@ -141,6 +155,27 @@ Result<GlassFramePlan> planGlassFrame(const GlassRenderScene &scene,
           .width = draw.destination.width,
           .height = draw.destination.height,
       });
+    if (handoff != handoffs.end()) {
+      const auto fallback = std::ranges::find_if(
+          scene.draws,
+          [&](const GlassDrawPlan &candidate) {
+            return candidate.key == handoff->second;
+          });
+      if (fallback == scene.draws.end())
+        return failure(ErrorCode::InvalidRequest,
+                       "scene.handoffs",
+                       "handoff fallback draw is missing");
+      if (fallback->key.output != draw.key.output ||
+          fallback->key.outputGeneration != draw.key.outputGeneration ||
+          fallback->key.stage != draw.key.stage)
+        return failure(ErrorCode::StaleGeneration,
+                       "scene.handoffs",
+                       "handoff presentations differ in output or stage");
+      const auto fallbackIndex = static_cast<std::size_t>(
+          std::distance(scene.draws.begin(), fallback));
+      result.fallbackDrawIndices.back() = fallbackIndex;
+      result.renderDamage.push_back(fallback->damageCoverage);
+    }
   }
   return Result<GlassFramePlan>::success(std::move(result));
 }

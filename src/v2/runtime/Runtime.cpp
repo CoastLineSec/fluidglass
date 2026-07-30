@@ -276,6 +276,10 @@ json capabilitiesJson(const RendererRuntimeStatus& renderer) {
             {"targets", true},
             {"compound_parts", true},
         }},
+        {"presentation_handoffs", {
+            {"retain_until_drawn", true},
+            {"target_kinds", json::array({"layer"})},
+        }},
         {"render_stages", json::array({"post-wallpaper", "pre-window", "post-windows", "post-layer"})},
         {"operations", json::array({
             "capabilities",
@@ -299,6 +303,7 @@ json capabilitiesJson(const RendererRuntimeStatus& renderer) {
             {"compound_connectors", Limits::MAX_COMPOUND_CONNECTORS},
             {"bezier_segments", Limits::MAX_BEZIER_SEGMENTS},
             {"transition_ms", Limits::MAX_TRANSITION_MS},
+            {"presentation_handoff_ms", Limits::MAX_PRESENTATION_HANDOFF_MS},
         }},
     };
 }
@@ -307,9 +312,11 @@ json statusJson(
     const ConfigStore& config,
     const SessionManager& sessions,
     const ReadinessTracker& readiness,
+    const PresentationHandoffTracker& handoffs,
     const RendererRuntimeStatus& renderer) {
     json sessionList = json::array();
     std::map<std::string_view, std::size_t> readinessTotals;
+    std::map<std::string_view, std::size_t> handoffTotals;
     for (const auto& snapshot : sessions.snapshots()) {
         sessionList.push_back({
             {"owner", snapshot.owner},
@@ -327,12 +334,19 @@ json statusJson(
                 static_cast<void>(key);
                 ++readinessTotals[readinessStateName(record.state)];
             }
+            if (const auto handoff = handoffs.target(identity))
+                for (const auto& presentation : handoff->presentations)
+                    ++handoffTotals[
+                        presentationHandoffStateName(presentation.state)];
         }
     }
 
     json readinessJson = json::object();
     for (const auto& [state, count] : readinessTotals)
         readinessJson[std::string(state)] = count;
+    json handoffJson = json::object();
+    for (const auto& [state, count] : handoffTotals)
+        handoffJson[std::string(state)] = count;
 
     const auto* active = config.active();
     json reloadError = nullptr;
@@ -369,6 +383,7 @@ json statusJson(
             {"dynamic_targets", sessions.targetCount()},
         }},
         {"readiness", std::move(readinessJson)},
+        {"presentation_handoffs", std::move(handoffJson)},
     };
 }
 
@@ -383,9 +398,42 @@ json presentationJson(const PresentationKey& key, const ReadinessRecord& record)
     };
 }
 
+json handoffJson(const PresentationHandoffRecord& handoff) {
+    json presentations = json::array();
+    bool retained = false;
+    bool failed = false;
+    for (const auto& presentation : handoff.presentations) {
+        retained = retained ||
+            presentation.state == PresentationHandoffState::Retained;
+        failed = failed ||
+            presentation.state == PresentationHandoffState::Failed;
+        presentations.push_back({
+            {"output", presentation.key.output},
+            {"output_generation", presentation.key.outputGeneration},
+            {"stage", renderStageName(presentation.key.stage)},
+            {"state", presentationHandoffStateName(presentation.state)},
+            {"detail", presentation.detail},
+        });
+    }
+    const auto state = retained
+        ? PresentationHandoffState::Retained
+        : failed
+            ? PresentationHandoffState::Failed
+            : PresentationHandoffState::Completed;
+    return {
+        {"target_id", handoff.identity.targetId},
+        {"source_generation", handoff.sourceGeneration},
+        {"successor_generation", handoff.successorGeneration},
+        {"expires_at_ms", handoff.expiresAtMs},
+        {"state", presentationHandoffStateName(state)},
+        {"presentations", std::move(presentations)},
+    };
+}
+
 Result<json> inspectTarget(
     SessionManager& sessions,
     const ReadinessTracker& readiness,
+    const PresentationHandoffTracker& handoffs,
     const InspectTargetRequest& request,
     std::uint64_t nowMs) {
     auto snapshot = sessions.inspect(request.sessionId, request.token, nowMs);
@@ -411,12 +459,16 @@ Result<json> inspectTarget(
         presentations.push_back(presentationJson(key, record));
 
     const auto targetState = readiness.target(identity);
+    json handoff = nullptr;
+    if (const auto record = handoffs.target(identity))
+        handoff = handoffJson(*record);
     return Result<json>::success({
         {"owner", snapshot.value().owner},
         {"generation", snapshot.value().generation},
         {"target", targetJson(*target)},
         {"state", targetState ? readinessStateName(targetState->state) : "accepted"},
         {"presentations", std::move(presentations)},
+        {"handoff", std::move(handoff)},
     });
 }
 
@@ -425,6 +477,7 @@ Result<json> dispatchRequest(
     ConfigStore& config,
     SessionManager& sessions,
     ReadinessTracker& readiness,
+    PresentationHandoffTracker& handoffs,
     const RendererRuntimeStatus& renderer,
     std::uint64_t nowMs) {
     return std::visit([&](const auto& body) -> Result<json> {
@@ -433,7 +486,7 @@ Result<json> dispatchRequest(
             return Result<json>::success(capabilitiesJson(renderer));
         } else if constexpr (std::is_same_v<T, StatusRequest>) {
             return Result<json>::success(
-                statusJson(config, sessions, readiness, renderer));
+                statusJson(config, sessions, readiness, handoffs, renderer));
         } else if constexpr (std::is_same_v<T, OpenSessionRequest>) {
             auto opened = sessions.open(body.clientId, body.mode, nowMs);
             if (!opened)
@@ -441,6 +494,16 @@ Result<json> dispatchRequest(
             return Result<json>::success(handleJson(opened.value()));
         } else if constexpr (std::is_same_v<T, ReplaceSessionRequest>) {
             const auto previous = sessions.snapshot(body.sessionId);
+            std::vector<PreparedPresentationHandoff> prepared;
+            if (previous) {
+                auto preparation = handoffs.prepare(
+                    *previous,
+                    body.replacement,
+                    readiness);
+                if (!preparation)
+                    return Result<json>::failure(preparation.error());
+                prepared = std::move(preparation.value());
+            }
             auto replaced = sessions.replace(
                 body.sessionId,
                 body.token,
@@ -449,6 +512,12 @@ Result<json> dispatchRequest(
                 nowMs);
             if (!replaced)
                 return Result<json>::failure(replaced.error());
+
+            handoffs.commit(
+                replaced.value().owner,
+                replaced.value().generation,
+                prepared,
+                nowMs);
 
             if (previous)
                 for (const auto& target : previous->targets)
@@ -461,12 +530,19 @@ Result<json> dispatchRequest(
                 if (!accepted)
                     return Result<json>::failure(accepted.error());
             }
+            json retained = json::array();
+            for (const auto& item : prepared) {
+                const auto record = handoffs.target(item.identity);
+                if (record)
+                    retained.push_back(handoffJson(*record));
+            }
             return Result<json>::success({
                 {"owner", replaced.value().owner},
                 {"generation", replaced.value().generation},
                 {"expires_at_ms", replaced.value().expiresAtMs},
                 {"materials", replaced.value().materials.size()},
                 {"targets", replaced.value().targets.size()},
+                {"handoffs", std::move(retained)},
             });
         } else if constexpr (std::is_same_v<T, HeartbeatSessionRequest>) {
             auto renewed = sessions.heartbeat(
@@ -485,9 +561,11 @@ Result<json> dispatchRequest(
             if (previous)
                 for (const auto& target : previous->targets)
                     readiness.erase({.owner = previous->owner, .targetId = target.id});
+            if (previous)
+                handoffs.eraseOwner(previous->owner);
             return Result<json>::success({{"closed", true}});
         } else {
-            return inspectTarget(sessions, readiness, body, nowMs);
+            return inspectTarget(sessions, readiness, handoffs, body, nowMs);
         }
     }, request.body);
 }
@@ -507,7 +585,8 @@ std::string RuntimeService::handle(std::string_view payload, std::uint64_t nowMs
         if (!request)
             return failureResponse(std::nullopt, request.error());
         auto result = dispatchRequest(request.value(), m_config, m_sessions,
-                                      m_readiness, m_rendererStatus, nowMs);
+                                      m_readiness, m_handoffs,
+                                      m_rendererStatus, nowMs);
         if (!result)
             return failureResponse(request.value().requestId, result.error());
         return successResponse(request.value().requestId, result.value());
@@ -519,6 +598,7 @@ std::string RuntimeService::handle(std::string_view payload, std::uint64_t nowMs
 void RuntimeService::tick(std::uint64_t nowMs) noexcept {
     try {
         expireSessions(nowMs);
+        m_handoffs.expire(nowMs);
     } catch (...) {
     }
 }
@@ -547,6 +627,14 @@ const ReadinessTracker& RuntimeService::readinessTracker() const noexcept {
     return m_readiness;
 }
 
+PresentationHandoffTracker& RuntimeService::handoffTracker() noexcept {
+    return m_handoffs;
+}
+
+const PresentationHandoffTracker& RuntimeService::handoffTracker() const noexcept {
+    return m_handoffs;
+}
+
 void RuntimeService::setRendererStatus(RendererRuntimeStatus status) noexcept {
     m_rendererStatus = std::move(status);
 }
@@ -556,12 +644,14 @@ const RendererRuntimeStatus& RuntimeService::rendererStatus() const noexcept {
 }
 
 void RuntimeService::expireSessions(std::uint64_t nowMs) {
-    for (const auto& expired : m_sessions.expire(nowMs))
+    for (const auto& expired : m_sessions.expire(nowMs)) {
         for (const auto& targetId : expired.targetIds)
             m_readiness.erase({
                 .owner = expired.owner,
                 .targetId = targetId,
             });
+        m_handoffs.eraseOwner(expired.owner);
+    }
 }
 
 } // namespace hfg::v2
