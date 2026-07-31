@@ -294,6 +294,30 @@ json capabilitiesJson(const RendererRuntimeStatus& renderer) {
                 {"max_active", Limits::MAX_DYNAMIC_TARGETS},
             }},
         }},
+        {"visibility_transitions", {
+            {"layer_targets", true},
+            {"translation", true},
+            {"opacity", true},
+            {"activation", "first-successful-draw"},
+            {"anchor", "compositor-monotonic"},
+            {"easings", json::array({"ease-out-cubic"})},
+            {"reversal", true},
+            {"supersession", true},
+            {"max_active_per_target", 1},
+            {"max_active", Limits::MAX_DYNAMIC_TARGETS},
+            {"maximum_duration_ms",
+             Limits::MAX_VISIBILITY_TRANSITION_MS},
+        }},
+        {"target_readiness", {
+            {"inactive_reporting", true},
+            {"inactive_reasons", json::array({
+                "disabled",
+                "empty-geometry",
+                "offscreen",
+                "suppressed",
+            })},
+            {"detail", true},
+        }},
         {"render_stages", json::array({"post-wallpaper", "pre-window", "post-windows", "post-layer"})},
         {"operations", json::array({
             "capabilities",
@@ -319,6 +343,8 @@ json capabilitiesJson(const RendererRuntimeStatus& renderer) {
             {"transition_ms", Limits::MAX_TRANSITION_MS},
             {"presentation_handoff_ms", Limits::MAX_PRESENTATION_HANDOFF_MS},
             {"presentation_morph_ms", Limits::MAX_PRESENTATION_MORPH_MS},
+            {"visibility_transition_ms",
+             Limits::MAX_VISIBILITY_TRANSITION_MS},
         }},
     };
 }
@@ -328,6 +354,7 @@ json statusJson(
     const SessionManager& sessions,
     const ReadinessTracker& readiness,
     const PresentationHandoffTracker& handoffs,
+    const VisibilityTransitionTracker& visibility,
     const RendererRuntimeStatus& renderer) {
     json sessionList = json::array();
     std::map<std::string_view, std::size_t> readinessTotals;
@@ -370,6 +397,13 @@ json statusJson(
     json morphJson = json::object();
     for (const auto& [state, count] : morphTotals)
         morphJson[std::string(state)] = count;
+    std::map<std::string_view, std::size_t> visibilityTotals;
+    for (const auto& record : visibility.records())
+        ++visibilityTotals[
+            visibilityTransitionStateName(record.state)];
+    json visibilityJson = json::object();
+    for (const auto& [state, count] : visibilityTotals)
+        visibilityJson[std::string(state)] = count;
 
     const auto* active = config.active();
     json reloadError = nullptr;
@@ -408,6 +442,40 @@ json statusJson(
         {"readiness", std::move(readinessJson)},
         {"presentation_handoffs", std::move(handoffJson)},
         {"presentation_morphs", std::move(morphJson)},
+        {"visibility_transitions", std::move(visibilityJson)},
+    };
+}
+
+json visibilityJson(const VisibilityTransitionRecord& record) {
+    return {
+        {"target_id", record.identity.targetId},
+        {"transition_id", record.transitionId},
+        {"source_generation", record.sourceGeneration},
+        {"successor_generation", record.successorGeneration},
+        {"direction",
+         visibilityTransitionDirectionName(record.direction)},
+        {"state", visibilityTransitionStateName(record.state)},
+        {"anchor_ms", record.anchorMs},
+        {"duration_ms", record.durationMs},
+        {"easing", "ease-out-cubic"},
+        {"activation", "first-successful-draw"},
+        {"starting_progress", record.startingProgress},
+        {"source_offset", {
+            {"x", record.sourceOffset.x},
+            {"y", record.sourceOffset.y},
+        }},
+        {"destination_offset", {
+            {"x", record.destinationOffset.x},
+            {"y", record.destinationOffset.y},
+        }},
+        {"source_opacity", record.sourceOpacity},
+        {"destination_opacity", record.destinationOpacity},
+        {"output", record.output},
+        {"output_generation",
+         record.outputGeneration
+             ? json(*record.outputGeneration)
+             : json(nullptr)},
+        {"detail", record.detail},
     };
 }
 
@@ -489,6 +557,7 @@ Result<json> inspectTarget(
     SessionManager& sessions,
     const ReadinessTracker& readiness,
     const PresentationHandoffTracker& handoffs,
+    const VisibilityTransitionTracker& visibility,
     const InspectTargetRequest& request,
     std::uint64_t nowMs) {
     auto snapshot = sessions.inspect(request.sessionId, request.token, nowMs);
@@ -517,13 +586,23 @@ Result<json> inspectTarget(
     json handoff = nullptr;
     if (const auto record = handoffs.target(identity))
         handoff = handoffJson(*record);
+    json visibilityTransition = nullptr;
+    if (const auto record = visibility.target(identity))
+        visibilityTransition = visibilityJson(*record);
+    // "inactive" carries no error, so the reason is the only thing that tells
+    // a client whether to keep waiting or to stop.
+    json detail = nullptr;
+    if (targetState && !targetState->detail.empty())
+        detail = targetState->detail;
     return Result<json>::success({
         {"owner", snapshot.value().owner},
         {"generation", snapshot.value().generation},
         {"target", targetJson(*target)},
         {"state", targetState ? readinessStateName(targetState->state) : "accepted"},
+        {"detail", std::move(detail)},
         {"presentations", std::move(presentations)},
         {"handoff", std::move(handoff)},
+        {"visibility_transition", std::move(visibilityTransition)},
     });
 }
 
@@ -533,6 +612,7 @@ Result<json> dispatchRequest(
     SessionManager& sessions,
     ReadinessTracker& readiness,
     PresentationHandoffTracker& handoffs,
+    VisibilityTransitionTracker& visibility,
     const RendererRuntimeStatus& renderer,
     std::uint64_t nowMs) {
     return std::visit([&](const auto& body) -> Result<json> {
@@ -541,7 +621,9 @@ Result<json> dispatchRequest(
             return Result<json>::success(capabilitiesJson(renderer));
         } else if constexpr (std::is_same_v<T, StatusRequest>) {
             return Result<json>::success(
-                statusJson(config, sessions, readiness, handoffs, renderer));
+                statusJson(
+                    config, sessions, readiness, handoffs, visibility,
+                    renderer));
         } else if constexpr (std::is_same_v<T, OpenSessionRequest>) {
             auto opened = sessions.open(body.clientId, body.mode, nowMs);
             if (!opened)
@@ -549,6 +631,7 @@ Result<json> dispatchRequest(
             return Result<json>::success(handleJson(opened.value()));
         } else if constexpr (std::is_same_v<T, ReplaceSessionRequest>) {
             const auto previous = sessions.snapshot(body.sessionId);
+            const auto owner = previous ? previous->owner : std::string{};
             std::vector<PreparedPresentationHandoff> prepared;
             if (previous) {
                 auto preparation = handoffs.prepare(
@@ -560,6 +643,14 @@ Result<json> dispatchRequest(
                     return Result<json>::failure(preparation.error());
                 prepared = std::move(preparation.value());
             }
+            auto visibilityPreparation = visibility.prepare(
+                previous,
+                body.replacement,
+                owner,
+                nowMs);
+            if (!visibilityPreparation)
+                return Result<json>::failure(
+                    visibilityPreparation.error());
             auto replaced = sessions.replace(
                 body.sessionId,
                 body.token,
@@ -574,6 +665,19 @@ Result<json> dispatchRequest(
                 replaced.value().generation,
                 prepared,
                 nowMs);
+            visibility.commit(
+                std::move(visibilityPreparation.value()));
+            for (const auto& record : visibility.records()) {
+                if (record.identity.owner != replaced.value().owner)
+                    continue;
+                const auto retained = std::ranges::any_of(
+                    replaced.value().targets,
+                    [&](const Target& target) {
+                        return target.id == record.identity.targetId;
+                    });
+                if (!retained)
+                    visibility.erase(record.identity);
+            }
 
             if (previous)
                 for (const auto& target : previous->targets)
@@ -592,6 +696,17 @@ Result<json> dispatchRequest(
                 if (record)
                     retained.push_back(handoffJson(*record));
             }
+            json acceptedVisibility = json::array();
+            for (const auto& request :
+                 body.replacement.visibilityTransitions) {
+                const auto record = visibility.target({
+                    .owner = replaced.value().owner,
+                    .targetId = request.targetId,
+                });
+                if (record)
+                    acceptedVisibility.push_back(
+                        visibilityJson(*record));
+            }
             return Result<json>::success({
                 {"owner", replaced.value().owner},
                 {"generation", replaced.value().generation},
@@ -599,6 +714,8 @@ Result<json> dispatchRequest(
                 {"materials", replaced.value().materials.size()},
                 {"targets", replaced.value().targets.size()},
                 {"handoffs", std::move(retained)},
+                {"visibility_transitions",
+                 std::move(acceptedVisibility)},
             });
         } else if constexpr (std::is_same_v<T, HeartbeatSessionRequest>) {
             auto renewed = sessions.heartbeat(
@@ -619,9 +736,12 @@ Result<json> dispatchRequest(
                     readiness.erase({.owner = previous->owner, .targetId = target.id});
             if (previous)
                 handoffs.eraseOwner(previous->owner);
+            if (previous)
+                visibility.eraseOwner(previous->owner);
             return Result<json>::success({{"closed", true}});
         } else {
-            return inspectTarget(sessions, readiness, handoffs, body, nowMs);
+            return inspectTarget(
+                sessions, readiness, handoffs, visibility, body, nowMs);
         }
     }, request.body);
 }
@@ -641,7 +761,7 @@ std::string RuntimeService::handle(std::string_view payload, std::uint64_t nowMs
         if (!request)
             return failureResponse(std::nullopt, request.error());
         auto result = dispatchRequest(request.value(), m_config, m_sessions,
-                                      m_readiness, m_handoffs,
+                                      m_readiness, m_handoffs, m_visibility,
                                       m_rendererStatus, nowMs);
         if (!result)
             return failureResponse(request.value().requestId, result.error());
@@ -655,6 +775,7 @@ void RuntimeService::tick(std::uint64_t nowMs) noexcept {
     try {
         expireSessions(nowMs);
         m_handoffs.expire(nowMs);
+        m_visibility.expire(nowMs);
     } catch (...) {
     }
 }
@@ -691,6 +812,15 @@ const PresentationHandoffTracker& RuntimeService::handoffTracker() const noexcep
     return m_handoffs;
 }
 
+VisibilityTransitionTracker& RuntimeService::visibilityTracker() noexcept {
+    return m_visibility;
+}
+
+const VisibilityTransitionTracker&
+RuntimeService::visibilityTracker() const noexcept {
+    return m_visibility;
+}
+
 void RuntimeService::setRendererStatus(RendererRuntimeStatus status) noexcept {
     m_rendererStatus = std::move(status);
 }
@@ -707,6 +837,7 @@ void RuntimeService::expireSessions(std::uint64_t nowMs) {
                 .targetId = targetId,
             });
         m_handoffs.eraseOwner(expired.owner);
+        m_visibility.eraseOwner(expired.owner);
     }
 }
 

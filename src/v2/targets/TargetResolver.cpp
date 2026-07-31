@@ -175,7 +175,15 @@ resolveSessionTargets(
                 continue;
             }
             if (!attachment.value()) {
-                batch.inactive.push_back(std::move(identity));
+                // The adapters resolve to no attachment for exactly two
+                // reasons: the client disabled the target, or its sub-rect
+                // clips to nothing inside the attachment it selected.
+                batch.inactive.push_back({
+                    .identity = std::move(identity),
+                    .reason = target.enabled
+                        ? TargetInactiveReason::EmptyGeometry
+                        : TargetInactiveReason::Disabled,
+                });
                 continue;
             }
             batch.resolved.push_back({

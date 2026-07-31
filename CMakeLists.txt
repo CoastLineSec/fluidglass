@@ -83,6 +83,7 @@ add_library(hyprfluidglass-v2-core STATIC
     src/v2/model/Readiness.cpp
     src/v2/model/Session.cpp
     src/v2/model/Target.cpp
+    src/v2/model/VisibilityTransition.cpp
     src/v2/render/CaptureBlit.cpp
     src/v2/render/CaptureCache.cpp
     src/v2/render/CaptureEnvironment.cpp
@@ -168,6 +169,14 @@ if(BUILD_TESTING)
     target_compile_options(hyprfluidglass-direct-scanout-lease-plan-tests PRIVATE -Wall -Wextra -Wpedantic)
     add_test(NAME hyprfluidglass-direct-scanout-lease-plan COMMAND hyprfluidglass-direct-scanout-lease-plan-tests)
 
+    add_executable(hyprfluidglass-hyprland-render-lifecycle-contract-tests tests/hyprland_render_lifecycle_contract_tests.cpp)
+    target_include_directories(hyprfluidglass-hyprland-render-lifecycle-contract-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+    target_compile_definitions(hyprfluidglass-hyprland-render-lifecycle-contract-tests PRIVATE
+        HYPRFLUIDGLASS_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+    target_compile_options(hyprfluidglass-hyprland-render-lifecycle-contract-tests PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME hyprfluidglass-hyprland-render-lifecycle-contract COMMAND hyprfluidglass-hyprland-render-lifecycle-contract-tests)
+
     add_executable(hyprfluidglass-opaque-id-tests tests/opaque_id_tests.cpp)
     target_include_directories(hyprfluidglass-opaque-id-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests")
     target_link_libraries(hyprfluidglass-opaque-id-tests PRIVATE hyprfluidglass-v2-core)
@@ -227,6 +236,12 @@ if(BUILD_TESTING)
     target_link_libraries(hyprfluidglass-presentation-handoff-tests PRIVATE hyprfluidglass-v2-core)
     target_compile_options(hyprfluidglass-presentation-handoff-tests PRIVATE -Wall -Wextra -Wpedantic)
     add_test(NAME hyprfluidglass-presentation-handoff COMMAND hyprfluidglass-presentation-handoff-tests)
+
+    add_executable(hyprfluidglass-visibility-transition-tests tests/visibility_transition_tests.cpp)
+    target_include_directories(hyprfluidglass-visibility-transition-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+    target_link_libraries(hyprfluidglass-visibility-transition-tests PRIVATE hyprfluidglass-v2-core)
+    target_compile_options(hyprfluidglass-visibility-transition-tests PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME hyprfluidglass-visibility-transition COMMAND hyprfluidglass-visibility-transition-tests)
 
     add_executable(hyprfluidglass-output-generation-tests tests/output_generation_tests.cpp)
     target_include_directories(hyprfluidglass-output-generation-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests")

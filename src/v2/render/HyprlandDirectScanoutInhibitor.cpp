@@ -2,6 +2,7 @@
 
 #include <hyprland/src/output/Monitor.hpp>
 #include <hyprland/src/pointer/PointerManager.hpp>
+#include <hyprland/src/render/Renderer.hpp>
 
 #include <algorithm>
 #include <exception>
@@ -28,6 +29,11 @@ HyprlandDirectScanoutInhibitor::~HyprlandDirectScanoutInhibitor() { clear(); }
 
 Result<void> HyprlandDirectScanoutInhibitor::reconcile(
     std::span<const DirectScanoutLease> desired) {
+  if (g_pHyprRenderer && g_pHyprRenderer->m_renderData.pMonitor)
+    return failure(
+        ErrorCode::UnsupportedOperation, "direct-scanout.render-frame",
+        "direct-scanout leases cannot change during an active render frame");
+
   auto &pointerManager = Pointer::mgr();
   if (!pointerManager)
     return failure(ErrorCode::UnsupportedOperation, "pointer-manager",

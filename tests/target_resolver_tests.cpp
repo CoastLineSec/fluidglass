@@ -209,6 +209,8 @@ int main() {
             require(result.value().resolved.empty(), "disabled target resolved");
             require(result.value().failures.empty(), "disabled target failed");
             require(result.value().inactive.size() == 1U, "disabled target was not inactive");
+            require(result.value().inactive.front().reason == TargetInactiveReason::Disabled,
+                    "disabled target did not report why it is inactive");
         }},
         Case{"duplicate current output generations fail the region only", [] {
             auto duplicate = output();

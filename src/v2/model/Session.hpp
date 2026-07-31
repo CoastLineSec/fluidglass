@@ -63,11 +63,36 @@ struct PresentationHandoffRequest {
                            const PresentationHandoffRequest&) = default;
 };
 
+enum class VisibilityTransitionDirection {
+    Hide,
+    Reveal,
+};
+
+struct VisibilityTransitionRequest {
+    std::string                   targetId;
+    std::string                   transitionId;
+    std::uint64_t                 sourceGeneration = 0;
+    VisibilityTransitionDirection direction =
+        VisibilityTransitionDirection::Hide;
+    TransitionEdge                edge = TransitionEdge::Top;
+    Rect                          sourceRect;
+    double                        sourceRadius = 0.0;
+    double                        travel = 0.0;
+    std::uint64_t                 durationMs = 0;
+    std::uint64_t                 timeoutMs = 0;
+    std::string                   output;
+    std::string                   namespaceName;
+
+    friend bool operator==(const VisibilityTransitionRequest&,
+                           const VisibilityTransitionRequest&) = default;
+};
+
 struct SessionReplacement {
     std::uint64_t                generation = 0;
     std::map<std::string, Material> materials;
     std::vector<Target>          targets;
     std::vector<PresentationHandoffRequest> handoffs = {};
+    std::vector<VisibilityTransitionRequest> visibilityTransitions = {};
 };
 
 struct SessionSnapshot {

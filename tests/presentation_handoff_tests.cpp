@@ -101,6 +101,37 @@ int main() {
                         ReadinessState::Drawn,
                     "handoff mutated authoritative readiness");
         }},
+        Case{"an exact retained fallback can cross an undrawn successor generation", [] {
+            Fixture fixture;
+            PresentationHandoffTracker tracker;
+            const auto prepared = prepare(fixture, tracker);
+            tracker.commit(fixture.current.owner, 4, std::array{prepared}, 100);
+
+            fixture.readiness.erase(fixture.identity);
+            require(fixture.readiness.accept(fixture.identity).hasValue(),
+                    "successor target accept failed");
+            fixture.current.generation = 4;
+            fixture.current.targets = fixture.replacement.targets;
+            fixture.replacement.generation = 5;
+            fixture.replacement.handoffs.front().sourceGeneration = 4;
+
+            auto continued = tracker.prepare(
+                fixture.current, fixture.replacement, fixture.readiness, 200);
+            require(continued && continued.value().size() == 1U &&
+                        continued.value().front().presentations ==
+                            std::vector{fixture.key},
+                    "retained fallback was not carried across the undrawn generation");
+            tracker.commit(
+                fixture.current.owner, 5, continued.value(), 200);
+            const auto record = tracker.target(fixture.identity);
+            require(record && record->sourceGeneration == 4 &&
+                        record->successorGeneration == 5 &&
+                        record->presentations.size() == 1U &&
+                        record->presentations.front().key == fixture.key &&
+                        record->presentations.front().state ==
+                            PresentationHandoffState::Retained,
+                    "continued fallback lost its exact presentation identity");
+        }},
         Case{"successor draw retires only its fallback", [] {
             Fixture fixture;
             PresentationHandoffTracker tracker;

@@ -191,6 +191,62 @@ int main() {
                         result["result"]["limits"]
                               ["presentation_morph_ms"] == 1000,
                     "presentation handoff capability is incomplete");
+            require(
+                result["result"]["visibility_transitions"]
+                      ["layer_targets"] == true &&
+                    result["result"]["visibility_transitions"]
+                      ["activation"] == "first-successful-draw" &&
+                    result["result"]["visibility_transitions"]
+                      ["reversal"] == true &&
+                    result["result"]["limits"]
+                      ["visibility_transition_ms"] == 1000,
+                "visibility transition capability is incomplete");
+            require(
+                result["result"]["target_readiness"]["inactive_reporting"] ==
+                        true &&
+                    result["result"]["target_readiness"]["detail"] == true &&
+                    result["result"]["target_readiness"]["inactive_reasons"] ==
+                        json::array({
+                            "disabled",
+                            "empty-geometry",
+                            "offscreen",
+                            "suppressed",
+                        }),
+                "inactive target reporting is not advertised");
+        }},
+        Case{"an inactive target is reported instead of waiting forever", [] {
+            Fixture fixture;
+            const auto opened = open(fixture.runtime);
+            const auto sessionId = opened["result"]["session_id"].get<std::string>();
+            const auto token = opened["result"]["token"].get<std::string>();
+            require(call(fixture.runtime, replacement(sessionId, token, 1))["ok"] == true,
+                    "session replacement failed");
+            const auto owner =
+                fixture.runtime.sessionManager().snapshots().front().owner;
+            require(fixture.runtime.readinessTracker()
+                        .failTarget(
+                            {.owner = owner, .targetId = "bar"},
+                            ReadinessState::Inactive,
+                            std::string(targetInactiveReasonDetail(
+                                TargetInactiveReason::Offscreen)))
+                        .hasValue(),
+                    "a resolved target could not be reported inactive");
+
+            const auto inspect = call(fixture.runtime, std::string(
+                R"({"version":2,"operation":"target.inspect","session_id":")") +
+                sessionId + R"(","token":")" + token + R"(","target_id":"bar"})");
+            require(inspect["result"]["state"] == "inactive",
+                    "an inactive target still inspects as accepted");
+            require(inspect["result"]["presentations"].empty(),
+                    "an inactive target reported a presentation");
+            require(inspect["result"]["detail"] ==
+                        "target intersects no current output",
+                    "an inactive target did not report why it is inactive");
+
+            const auto status = call(
+                fixture.runtime, R"({"version":2,"operation":"status"})");
+            require(status["result"]["readiness"]["inactive"] == 1,
+                    "status did not aggregate the inactive target");
         }},
         Case{"capabilities and status report the live renderer truthfully", [] {
             Fixture fixture;

@@ -556,9 +556,12 @@ int main() {
             require(result.value().presentations.empty(),
                     "clipped target produced a presentation");
             require(result.value().inactive.size() == 1U &&
-                        result.value().inactive.front().targetId ==
+                        result.value().inactive.front().identity.targetId ==
                             "offscreen",
                     "clipped target was not marked inactive");
+            require(result.value().inactive.front().reason ==
+                        TargetInactiveReason::Offscreen,
+                    "clipped target did not report why it is inactive");
         }},
         Case{"duplicate current output names fail globally", [] {
             const auto active = config();
@@ -605,7 +608,8 @@ int main() {
         Case{"target scene state is carried into presentation state", [] {
             TargetScene targets{
                 .effective = {},
-                .inactive = {{"client:a:s1", "inactive"}},
+                .inactive = {{{"client:a:s1", "inactive"},
+                              TargetInactiveReason::Disabled}},
                 .suppressed = {{"config", "suppressed"}},
                 .failures = {{
                     .identity = {"client:b:s2", "failed"},
@@ -629,6 +633,78 @@ int main() {
                     "suppressed state was lost");
             require(result.value().failures == targets.failures,
                     "resolution failures were lost");
+        }},
+        Case{"revealing visibility keeps the full outward damage envelope", [] {
+            auto owner = session();
+            auto moving = target(
+                owner.owner,
+                "bar",
+                MaterialSource::Session,
+                "local",
+                Rect{0.0, 0.0, 100.0, 44.0});
+            moving.definition.kind = TargetKind::Layer;
+            moving.definition.selector =
+                LayerSelector{.namespaceName = "hgs:bar:DP-1"};
+            moving.definition.shape = RoundedRectShape{.radius = 18.0};
+            moving.attachment.kind = TargetKind::Layer;
+            moving.attachment.stage = RenderStage::PostLayer;
+            moving.attachment.outputFilter = "DP-1";
+            moving.definition.stage = RenderStage::PostLayer;
+            owner.targets = {moving.definition};
+            SessionReplacement replacement{
+                .generation = 2,
+                .materials = owner.materials,
+                .targets = {moving.definition},
+                .handoffs = {},
+                .visibilityTransitions = {{
+                    .targetId = "bar",
+                    .transitionId = "reveal-1",
+                    .sourceGeneration = 1,
+                    .direction = VisibilityTransitionDirection::Reveal,
+                    .edge = TransitionEdge::Top,
+                    .sourceRect = {0.0, 0.0, 100.0, 44.0},
+                    .sourceRadius = 18.0,
+                    .travel = 52.0,
+                    .durationMs = 200,
+                    .timeoutMs = 750,
+                    .output = "DP-1",
+                    .namespaceName = "hgs:bar:DP-1",
+                }},
+            };
+            VisibilityTransitionTracker visibility;
+            auto prepared = visibility.prepare(
+                owner, replacement, owner.owner, 1'000);
+            require(prepared.hasValue(), "reveal was not prepared");
+            visibility.commit(std::move(prepared.value()));
+            TargetScene targets{
+                .effective = {moving},
+                .inactive = {},
+                .suppressed = {},
+                .failures = {},
+            };
+            const std::array sessions{owner};
+            const std::array outputs{output("DP-1", 0.0, 1)};
+            const auto result = buildPresentationScene(
+                targets,
+                nullptr,
+                sessions,
+                outputs,
+                1'000,
+                nullptr,
+                &visibility);
+            require(result && result.value().presentations.size() == 1U,
+                    "armed reveal did not produce a presentation");
+            const auto& planned = result.value().presentations.front();
+            require(
+                planned.target.attachment.globalGeometry ==
+                        Rect{0.0, 0.0, 100.0, 44.0} &&
+                    planned.target.transitionEnvelopeGlobal ==
+                        Rect{0.0, -52.0, 100.0, 96.0} &&
+                    planned.transitionEnvelope &&
+                    planned.transitionEnvelope->outputLocal ==
+                        Rect{0.0, 0.0, 100.0, 44.0} &&
+                    planned.presentation.opacity == 0.0,
+                "reveal capture omitted the outward source position");
         }},
         Case{"target motion resolves before output mapping", [] {
             const auto active = config();

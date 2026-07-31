@@ -43,7 +43,7 @@ struct CaptureScene {
     std::vector<CapturePlan>                captures;
     std::vector<CaptureAssignment>          assignments;
     std::vector<PresentationHandoffPair>    handoffs = {};
-    std::vector<TargetIdentity>             inactive;
+    std::vector<InactiveTarget>             inactive;
     std::vector<TargetIdentity>             suppressed;
     std::vector<TargetResolutionFailure>    targetFailures;
     std::vector<PresentationCaptureFailure> captureFailures;

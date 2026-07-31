@@ -923,6 +923,7 @@ Result<Request> parseDocument(const json& document) {
             .materials = {},
             .targets = {},
             .handoffs = {},
+            .visibilityTransitions = {},
         };
         const auto materials = document.find("materials");
         if (materials == document.end() || !materials->is_object())
@@ -1125,11 +1126,164 @@ Result<Request> parseDocument(const json& document) {
                 });
             }
         }
+        if (const auto transitions =
+                document.find("visibility_transitions");
+            transitions != document.end()) {
+            if (!transitions->is_array())
+                return invalid<Request>(
+                    ErrorCode::InvalidRequest,
+                    "visibility_transitions",
+                    "visibility transitions must be an array");
+            if (transitions->size() > Limits::MAX_TARGETS_PER_SESSION)
+                return invalid<Request>(
+                    ErrorCode::ResourceLimited,
+                    "visibility_transitions",
+                    "visibility transition limit exceeded");
+            for (std::size_t index = 0;
+                 index < transitions->size();
+                 ++index) {
+                const auto& value = (*transitions)[index];
+                const auto path =
+                    "visibility_transitions[" +
+                    std::to_string(index) + "]";
+                if (!value.is_object())
+                    return invalid<Request>(
+                        ErrorCode::InvalidRequest,
+                        path,
+                        "visibility transition must be an object");
+                if (auto error = rejectUnknown(
+                        value,
+                        {"target_id", "transition_id",
+                         "source_generation", "direction", "edge",
+                         "source_rect", "source_radius", "travel", "duration_ms",
+                         "easing", "anchor", "activation",
+                         "timeout_ms", "output", "namespace"},
+                        path))
+                    return Result<Request>::failure(std::move(*error));
+                const auto targetId = requiredString(
+                    value, "target_id", path + ".target_id");
+                const auto transitionId = requiredString(
+                    value, "transition_id", path + ".transition_id");
+                const auto sourceGeneration = requiredUnsigned(
+                    value, "source_generation",
+                    path + ".source_generation");
+                const auto direction = requiredString(
+                    value, "direction", path + ".direction");
+                const auto edge = requiredString(
+                    value, "edge", path + ".edge");
+                const auto duration = requiredUnsigned(
+                    value, "duration_ms", path + ".duration_ms");
+                const auto easing = requiredString(
+                    value, "easing", path + ".easing");
+                const auto anchor = requiredString(
+                    value, "anchor", path + ".anchor");
+                const auto activation = requiredString(
+                    value, "activation", path + ".activation");
+                const auto timeout = requiredUnsigned(
+                    value, "timeout_ms", path + ".timeout_ms");
+                const auto output = requiredString(
+                    value, "output", path + ".output");
+                const auto namespaceName = requiredString(
+                    value, "namespace", path + ".namespace");
+                if (!targetId) return Result<Request>::failure(targetId.error());
+                if (!transitionId) return Result<Request>::failure(transitionId.error());
+                if (!sourceGeneration) return Result<Request>::failure(sourceGeneration.error());
+                if (!direction) return Result<Request>::failure(direction.error());
+                if (!edge) return Result<Request>::failure(edge.error());
+                if (!duration) return Result<Request>::failure(duration.error());
+                if (!easing) return Result<Request>::failure(easing.error());
+                if (!anchor) return Result<Request>::failure(anchor.error());
+                if (!activation) return Result<Request>::failure(activation.error());
+                if (!timeout) return Result<Request>::failure(timeout.error());
+                if (!output) return Result<Request>::failure(output.error());
+                if (!namespaceName) return Result<Request>::failure(namespaceName.error());
+                if (easing.value() != "ease-out-cubic" ||
+                    anchor.value() != "compositor-monotonic" ||
+                    activation.value() != "first-successful-draw")
+                    return invalid<Request>(
+                        ErrorCode::UnsupportedOperation,
+                        path,
+                        "visibility transition timing contract is unsupported");
+                VisibilityTransitionDirection parsedDirection;
+                if (direction.value() == "hide")
+                    parsedDirection = VisibilityTransitionDirection::Hide;
+                else if (direction.value() == "reveal")
+                    parsedDirection = VisibilityTransitionDirection::Reveal;
+                else
+                    return invalid<Request>(
+                        ErrorCode::InvalidRequest,
+                        path + ".direction",
+                        "visibility transition direction must be hide or reveal");
+                TransitionEdge parsedEdge;
+                if (edge.value() == "top") parsedEdge = TransitionEdge::Top;
+                else if (edge.value() == "bottom") parsedEdge = TransitionEdge::Bottom;
+                else if (edge.value() == "left") parsedEdge = TransitionEdge::Left;
+                else if (edge.value() == "right") parsedEdge = TransitionEdge::Right;
+                else
+                    return invalid<Request>(
+                        ErrorCode::InvalidRequest,
+                        path + ".edge",
+                        "visibility transition edge is unsupported");
+                const auto rectValue = value.find("source_rect");
+                if (rectValue == value.end())
+                    return invalid<Request>(
+                        ErrorCode::InvalidRequest,
+                        path + ".source_rect",
+                        "visibility transition requires a source rectangle");
+                auto sourceRect = parseLocalRect(
+                    *rectValue, path + ".source_rect");
+                if (!sourceRect)
+                    return Result<Request>::failure(sourceRect.error());
+                const auto sourceRadiusValue =
+                    value.find("source_radius");
+                if (sourceRadiusValue == value.end() ||
+                    !sourceRadiusValue->is_number())
+                    return invalid<Request>(
+                        ErrorCode::InvalidRequest,
+                        path + ".source_radius",
+                        "visibility transition source radius must be a number");
+                const auto sourceRadius =
+                    sourceRadiusValue->get<double>();
+                if (!std::isfinite(sourceRadius))
+                    return invalid<Request>(
+                        ErrorCode::InvalidRequest,
+                        path + ".source_radius",
+                        "visibility transition source radius must be finite");
+                const auto travelValue = value.find("travel");
+                if (travelValue == value.end() ||
+                    !travelValue->is_number())
+                    return invalid<Request>(
+                        ErrorCode::InvalidRequest,
+                        path + ".travel",
+                        "visibility transition travel must be a number");
+                const auto travel = travelValue->get<double>();
+                if (!std::isfinite(travel))
+                    return invalid<Request>(
+                        ErrorCode::InvalidRequest,
+                        path + ".travel",
+                        "visibility transition travel must be finite");
+                replacement.visibilityTransitions.push_back({
+                    .targetId = targetId.value(),
+                    .transitionId = transitionId.value(),
+                    .sourceGeneration = sourceGeneration.value(),
+                    .direction = parsedDirection,
+                    .edge = parsedEdge,
+                    .sourceRect = sourceRect.value(),
+                    .sourceRadius = sourceRadius,
+                    .travel = travel,
+                    .durationMs = duration.value(),
+                    .timeoutMs = timeout.value(),
+                    .output = output.value(),
+                    .namespaceName = namespaceName.value(),
+                });
+            }
+        }
         return finish(ReplaceSessionRequest{
             .sessionId = sessionId.value(),
             .token = token.value(),
             .replacement = std::move(replacement),
-        }, {"session_id", "token", "generation", "materials", "targets", "handoffs"});
+        }, {"session_id", "token", "generation", "materials", "targets",
+            "handoffs", "visibility_transitions"});
     }
     if (operation.value() == "session.heartbeat") {
         const auto sessionId = requiredString(document, "session_id", "session_id");

@@ -131,17 +131,12 @@ HyprlandGlassSceneController::onPreChecks(PHLMONITOR monitor,
 }
 
 Result<void>
-HyprlandGlassSceneController::onRenderStage(eRenderStage stage,
-                                             std::uint64_t nowMs) {
+HyprlandGlassSceneController::onRenderStage(eRenderStage stage) {
     if (!m_initialized)
         return failure(ErrorCode::UnsupportedOperation, "controller",
                        "v2 scene controller is not initialized");
 
     if (stage == RENDER_BEGIN) {
-        if (auto refreshed = refreshResolvedScene(nowMs); !refreshed) {
-            recordFailure(refreshed.error());
-            return refreshed;
-        }
         if (auto prepared = prepareRenderScene(); !prepared) {
             recordFailure(prepared.error());
             return prepared;
@@ -171,6 +166,7 @@ HyprlandGlassSceneController::onRenderStage(eRenderStage stage,
 
 Result<void> HyprlandGlassSceneController::refreshResolvedScene(
     std::uint64_t nowMs) {
+    m_lastNowMs = nowMs;
     m_runtime.tick(nowMs);
     auto outputs = m_outputs.refresh();
     if (!outputs)
@@ -224,7 +220,8 @@ Result<void> HyprlandGlassSceneController::refreshResolvedScene(
         buildPresentationScene(targets.value(),
                                m_runtime.configStore().active(), sessions,
                                outputs.value().current, nowMs,
-                               &m_runtime.handoffTracker());
+                               &m_runtime.handoffTracker(),
+                               &m_runtime.visibilityTracker());
     if (!presentations)
         return Result<void>::failure(presentations.error());
     auto bindings =
@@ -370,6 +367,7 @@ void HyprlandGlassSceneController::onDrawResult(
             static_cast<void>(
                 readiness.transition(key, ReadinessState::Drawn));
             m_runtime.handoffTracker().complete(key);
+            m_runtime.visibilityTracker().activate(key, m_lastNowMs);
         }
     } catch (...) {
     }
@@ -466,6 +464,7 @@ void HyprlandGlassSceneController::applyPresentationHandoffs(
         }
     } catch (...) {
         m_runtime.handoffTracker().clear();
+        m_runtime.visibilityTracker().clear();
         m_handoffFallbacks.clear();
     }
 }
@@ -526,6 +525,23 @@ void HyprlandGlassSceneController::reconcileReadiness(
             static_cast<void>(readiness.failTarget(
                 failed.identity, readinessFailureState(failed.error),
                 failed.error.message));
+
+    // A target that resolves but contributes no presentation is neither
+    // planned above nor failed here, so nothing would ever move it off
+    // "accepted". Left unreported it is indistinguishable from a target still
+    // being resolved, and a client waiting on a drawn presentation waits
+    // forever with no failure and no timeout to observe.
+    const auto reportInactive = [&](const TargetIdentity& identity,
+                                    TargetInactiveReason reason) {
+        if (readiness.target(identity))
+            static_cast<void>(readiness.failTarget(
+                identity, ReadinessState::Inactive,
+                std::string(targetInactiveReasonDetail(reason))));
+    };
+    for (const auto& inactive : m_presentations.inactive)
+        reportInactive(inactive.identity, inactive.reason);
+    for (const auto& suppressed : m_presentations.suppressed)
+        reportInactive(suppressed, TargetInactiveReason::Suppressed);
 }
 
 void HyprlandGlassSceneController::recordFailure(Error error) noexcept {
@@ -553,6 +569,7 @@ void HyprlandGlassSceneController::clearLiveState() noexcept {
     m_capturePresentations.clear();
     m_handoffFallbacks.clear();
     m_runtime.handoffTracker().clear();
+    m_runtime.visibilityTracker().clear();
 }
 
 void HyprlandGlassSceneController::publishStatus() noexcept {

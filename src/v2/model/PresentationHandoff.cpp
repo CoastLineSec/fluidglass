@@ -206,8 +206,9 @@ PresentationHandoffTracker::prepare(
                  PresentationMorphState::Active ||
              existing->second.morph->state ==
                  PresentationMorphState::Settling);
-        const auto activeMorph =
-            existingMorphActive &&
+        const auto retainedFallbackAvailable =
+            existing != m_records.end() &&
+            existing->second.successorGeneration == current.generation &&
             std::ranges::any_of(
                 existing->second.presentations,
                 [](const PresentationHandoffPresentation& presentation) {
@@ -220,7 +221,7 @@ PresentationHandoffTracker::prepare(
             std::ranges::none_of(presentations, [](const auto& entry) {
                 return entry.second.state != ReadinessState::Drawn;
             });
-        if (!fullyDrawn && !activeMorph)
+        if (!fullyDrawn && !retainedFallbackAvailable)
             return failure<std::vector<PreparedPresentationHandoff>>(
                 ErrorCode::UnresolvedTarget,
                 path + ".target_id",

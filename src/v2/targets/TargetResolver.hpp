@@ -21,7 +21,7 @@ struct TargetResolutionFailure {
 
 struct TargetResolutionBatch {
     std::vector<ResolvedTarget>          resolved;
-    std::vector<TargetIdentity>          inactive;
+    std::vector<InactiveTarget>          inactive;
     std::vector<TargetResolutionFailure> failures;
 
     friend bool operator==(const TargetResolutionBatch&, const TargetResolutionBatch&) = default;

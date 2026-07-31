@@ -40,8 +40,7 @@ class HyprlandGlassSceneController final
     [[nodiscard]] Result<void> refresh(std::uint64_t nowMs);
     [[nodiscard]] Result<void> onPreChecks(PHLMONITOR monitor,
                                             std::uint64_t nowMs);
-    [[nodiscard]] Result<void> onRenderStage(eRenderStage stage,
-                                              std::uint64_t nowMs);
+    [[nodiscard]] Result<void> onRenderStage(eRenderStage stage);
 
     void onCaptureResult(std::uint64_t resourceToken,
                          std::uint64_t frameToken,
@@ -98,6 +97,7 @@ class HyprlandGlassSceneController final
     std::optional<Error> m_lastError;
     bool m_initialized = false;
     bool m_renderingReady = false;
+    std::uint64_t m_lastNowMs = 0;
 };
 
 } // namespace hfg::v2

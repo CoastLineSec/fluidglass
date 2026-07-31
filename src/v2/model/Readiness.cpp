@@ -148,6 +148,7 @@ bool ReadinessTracker::validPresentationTransition(ReadinessState from, Readines
         case ReadinessState::Accepted:
         case ReadinessState::Invalid:
         case ReadinessState::Expired:
+        case ReadinessState::Inactive:
             return false;
     }
     return false;
@@ -156,7 +157,8 @@ bool ReadinessTracker::validPresentationTransition(ReadinessState from, Readines
 bool ReadinessTracker::validTargetFailure(ReadinessState state) {
     return state == ReadinessState::Invalid || state == ReadinessState::Unresolved ||
         state == ReadinessState::Unsupported || state == ReadinessState::ResourceLimited ||
-        state == ReadinessState::Expired || state == ReadinessState::Detached;
+        state == ReadinessState::Expired || state == ReadinessState::Detached ||
+        state == ReadinessState::Inactive;
 }
 
 } // namespace hfg::v2

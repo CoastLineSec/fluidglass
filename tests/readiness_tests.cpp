@@ -116,5 +116,32 @@ int main() {
             require(!tracker.resolvePresentation(presentation()), "unaccepted target resolved");
             require(!tracker.failTarget(identity(), ReadinessState::Invalid), "unaccepted target failed");
         }},
+        Case{"inactivity is a target state a client can observe", [] {
+            ReadinessTracker tracker;
+            require(tracker.accept(identity()).hasValue(), "target was not accepted");
+            const auto inactive = tracker.failTarget(
+                identity(),
+                ReadinessState::Inactive,
+                std::string(targetInactiveReasonDetail(
+                    TargetInactiveReason::Offscreen)));
+            require(inactive.hasValue(), "inactive was rejected as a target state");
+            require(inactive.value().state == ReadinessState::Inactive,
+                    "inactive state was not stored");
+            require(inactive.value().detail == "target intersects no current output",
+                    "inactive target did not carry a reason");
+            require(readinessStateName(ReadinessState::Inactive) == "inactive",
+                    "inactive state has no wire name");
+        }},
+        Case{"an inactive target recovers when it becomes drawable", [] {
+            ReadinessTracker tracker;
+            require(tracker.accept(identity()).hasValue(), "target was not accepted");
+            require(tracker.failTarget(identity(), ReadinessState::Inactive, "offscreen").hasValue(),
+                    "inactive was rejected as a target state");
+            require(tracker.accept(identity()).hasValue(), "inactive target could not be re-accepted");
+            require(tracker.resolvePresentation(presentation()).hasValue(),
+                    "presentation could not resolve after inactivity");
+            require(tracker.transition(presentation(), ReadinessState::Attached).hasValue(),
+                    "presentation could not attach after inactivity");
+        }},
     });
 }

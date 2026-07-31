@@ -16,7 +16,7 @@ namespace hfg::v2 {
 
 struct TargetScene {
     std::vector<ResolvedTarget>          effective;
-    std::vector<TargetIdentity>          inactive;
+    std::vector<InactiveTarget>          inactive;
     std::vector<TargetIdentity>          suppressed;
     std::vector<TargetResolutionFailure> failures;
 

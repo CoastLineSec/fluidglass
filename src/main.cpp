@@ -2593,11 +2593,7 @@ void renderFluidGlass(eRenderStage stage) {
     }
     try {
         if (g_v2Controller && v2HasPotentialScene()) {
-            const auto nowMs = static_cast<std::uint64_t>(
-                std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::steady_clock::now().time_since_epoch())
-                    .count());
-            if (auto rendered = g_v2Controller->onRenderStage(stage, nowMs);
+            if (auto rendered = g_v2Controller->onRenderStage(stage);
                 !rendered)
                 recordBoundaryFailure("v2-render-stage",
                                       rendered.error().message.c_str());

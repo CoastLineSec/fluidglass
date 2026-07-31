@@ -177,6 +177,83 @@ Result<ResolvedTarget> applyPresentationMorph(
     return Result<ResolvedTarget>::success(std::move(target));
 }
 
+Result<ResolvedTarget> applyVisibilityTransition(
+    ResolvedTarget target,
+    VisibilityTransitionTracker* visibility,
+    std::span<const OutputGeneration> outputs,
+    std::uint64_t nowMs) {
+    if (!visibility)
+        return Result<ResolvedTarget>::success(std::move(target));
+    const auto record = visibility->target(target.attachment.identity);
+    if (!record ||
+        (record->state != VisibilityTransitionState::Armed &&
+         record->state != VisibilityTransitionState::Active &&
+         record->state != VisibilityTransitionState::Completed))
+        return Result<ResolvedTarget>::success(std::move(target));
+    if (target.attachment.kind != TargetKind::Layer ||
+        !target.attachment.outputFilter)
+        return Result<ResolvedTarget>::failure({
+            .code = ErrorCode::UnsupportedTarget,
+            .path = "visibility_transition.target",
+            .message = "visibility transition requires a resolved layer target",
+        });
+    const auto output = std::ranges::find(
+        outputs, *target.attachment.outputFilter,
+        [](const OutputGeneration& candidate) {
+            return candidate.snapshot.name;
+        });
+    if (output == outputs.end())
+        return Result<ResolvedTarget>::failure({
+            .code = ErrorCode::StaleGeneration,
+            .path = "visibility_transition.output",
+            .message = "visibility transition output is no longer current",
+        });
+    if (!visibility->bind(
+            target.attachment.identity,
+            output->snapshot.name,
+            output->generation,
+            target.attachment.objectToken))
+        return Result<ResolvedTarget>::failure({
+            .code = ErrorCode::StaleGeneration,
+            .path = "visibility_transition.lifetime",
+            .message = "visibility transition surface or output changed",
+        });
+    auto sample = visibility->sample(target.attachment.identity, nowMs);
+    if (!sample)
+        return Result<ResolvedTarget>::failure(sample.error());
+    target.attachment.globalGeometry = {
+        .x = output->snapshot.logicalX + record->sourceRect.x +
+            sample.value().offset.x,
+        .y = output->snapshot.logicalY + record->sourceRect.y +
+            sample.value().offset.y,
+        .width = record->sourceRect.width,
+        .height = record->sourceRect.height,
+    };
+    target.attachment.opacity *= sample.value().opacity;
+    target.definition.shape = RoundedRectShape{
+        .radius = record->sourceRadius,
+    };
+    target.transitionEnvelopeGlobal = Rect{
+        .x = output->snapshot.logicalX +
+            record->sourceRect.x +
+            std::min(record->sourceOffset.x,
+                     record->destinationOffset.x),
+        .y = output->snapshot.logicalY +
+            record->sourceRect.y +
+            std::min(record->sourceOffset.y,
+                     record->destinationOffset.y),
+        .width = record->sourceRect.width +
+            std::abs(record->destinationOffset.x -
+                     record->sourceOffset.x),
+        .height = record->sourceRect.height +
+            std::abs(record->destinationOffset.y -
+                     record->sourceOffset.y),
+    };
+    target.transitionAnchorMs = record->anchorMs;
+    target.transitionActive = sample.value().active;
+    return Result<ResolvedTarget>::success(std::move(target));
+}
+
 } // namespace
 
 Result<PresentationScene>
@@ -186,7 +263,8 @@ buildPresentationScene(
     std::span<const SessionSnapshot> sessions,
     std::span<const OutputGeneration> outputs,
     std::uint64_t nowMs,
-    PresentationHandoffTracker* handoffs) {
+    PresentationHandoffTracker* handoffs,
+    VisibilityTransitionTracker* visibility) {
     if (targets.effective.size() >
         Limits::MAX_COMPOSITOR_OBJECTS)
         return failure(
@@ -267,6 +345,18 @@ buildPresentationScene(
             });
             continue;
         }
+        movingTarget = applyVisibilityTransition(
+            std::move(movingTarget.value()),
+            visibility,
+            outputs,
+            nowMs);
+        if (!movingTarget) {
+            scene.failures.push_back({
+                .identity = identity,
+                .error = movingTarget.error(),
+            });
+            continue;
+        }
         auto material = resolveTargetMaterial(
             movingTarget.value(),
             config,
@@ -289,7 +379,12 @@ buildPresentationScene(
             continue;
         }
         if (presentations.value().empty()) {
-            scene.inactive.push_back(identity);
+            // The target resolved and its geometry is valid — it simply lands
+            // on no current output. Nothing downstream will ever revisit it.
+            scene.inactive.push_back({
+                .identity = identity,
+                .reason = TargetInactiveReason::Offscreen,
+            });
             continue;
         }
 

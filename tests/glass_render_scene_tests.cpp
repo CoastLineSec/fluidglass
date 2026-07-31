@@ -104,7 +104,8 @@ Fixture fixture() {
           },
       .inactive =
           {
-              TargetIdentity{"config", "inactive"},
+              InactiveTarget{TargetIdentity{"config", "inactive"},
+                             TargetInactiveReason::Offscreen},
           },
       .suppressed =
           {

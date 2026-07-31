@@ -26,6 +26,7 @@ enum class ReadinessState {
     ResourceLimited,
     Expired,
     Detached,
+    Inactive,
 };
 
 [[nodiscard]] constexpr std::string_view readinessStateName(ReadinessState state) noexcept {
@@ -43,6 +44,7 @@ enum class ReadinessState {
         case ReadinessState::ResourceLimited: return "resource-limited";
         case ReadinessState::Expired:         return "expired";
         case ReadinessState::Detached:        return "detached";
+        case ReadinessState::Inactive:        return "inactive";
     }
     return "invalid";
 }
@@ -53,6 +55,52 @@ struct TargetIdentity {
 
     friend bool operator==(const TargetIdentity&, const TargetIdentity&) = default;
     friend auto operator<=>(const TargetIdentity&, const TargetIdentity&) = default;
+};
+
+// A target can resolve cleanly and still contribute nothing to draw. That is
+// not a failure and will never turn into one, so without its own state it is
+// indistinguishable from a target that is merely still being resolved — and a
+// client waiting for a drawn presentation would wait forever with nothing to
+// observe. The reason says which of the four ways it happened.
+enum class TargetInactiveReason {
+    Disabled,
+    EmptyGeometry,
+    Offscreen,
+    Suppressed,
+};
+
+[[nodiscard]] constexpr std::string_view targetInactiveReasonName(
+    TargetInactiveReason reason) noexcept {
+    switch (reason) {
+        case TargetInactiveReason::Disabled:      return "disabled";
+        case TargetInactiveReason::EmptyGeometry: return "empty-geometry";
+        case TargetInactiveReason::Offscreen:     return "offscreen";
+        case TargetInactiveReason::Suppressed:    return "suppressed";
+    }
+    return "disabled";
+}
+
+[[nodiscard]] constexpr std::string_view targetInactiveReasonDetail(
+    TargetInactiveReason reason) noexcept {
+    switch (reason) {
+        case TargetInactiveReason::Disabled:
+            return "target is disabled";
+        case TargetInactiveReason::EmptyGeometry:
+            return "target geometry clips to nothing inside its attachment";
+        case TargetInactiveReason::Offscreen:
+            return "target intersects no current output";
+        case TargetInactiveReason::Suppressed:
+            return "a higher-precedence target holds the same attachment";
+    }
+    return "target is inactive";
+}
+
+struct InactiveTarget {
+    TargetIdentity       identity;
+    TargetInactiveReason reason = TargetInactiveReason::Disabled;
+
+    friend bool operator==(const InactiveTarget&, const InactiveTarget&) = default;
+    friend auto operator<=>(const InactiveTarget&, const InactiveTarget&) = default;
 };
 
 struct PresentationKey {

@@ -209,6 +209,64 @@ int main() {
             require(!unknown && unknown.error().path == "handoffs[0].secret",
                     "unknown handoff field bypassed strict parsing");
         }},
+        Case{"visibility transition request is additive and strict", [] {
+            const auto result = parseRequest(R"({
+                "version":2,"operation":"session.replace",
+                "session_id":"one","token":"two","generation":2,
+                "materials":{"fluid":{}},
+                "targets":[{
+                    "id":"bar","kind":"layer",
+                    "selector":{"namespace":"hgs:bar:DP-1"},
+                    "geometry":{"space":"surface-local","x":0,"y":0,"width":800,"height":44},
+                    "material":{"source":"session","name":"fluid"},
+                    "shape":{"kind":"rounded-rect","radius":18}
+                }],
+                "visibility_transitions":[{
+                    "target_id":"bar","transition_id":"hide-1",
+                    "source_generation":1,"direction":"hide",
+                    "edge":"top",
+                    "source_rect":{"x":12,"y":8,"width":776,"height":44},
+                    "source_radius":18,"travel":52,
+                    "duration_ms":220,"easing":"ease-out-cubic",
+                    "anchor":"compositor-monotonic",
+                    "activation":"first-successful-draw",
+                    "timeout_ms":750,"output":"DP-1",
+                    "namespace":"hgs:bar:DP-1"
+                }]
+            })");
+            require(result.hasValue(), "valid visibility request failed");
+            const auto& transitions =
+                std::get<ReplaceSessionRequest>(result.value().body)
+                    .replacement.visibilityTransitions;
+            require(transitions.size() == 1U &&
+                        transitions.front().targetId == "bar" &&
+                        transitions.front().edge == TransitionEdge::Top &&
+                        transitions.front().sourceRadius == 18.0 &&
+                        transitions.front().travel == 52.0,
+                    "visibility fields changed while parsing");
+
+            const auto unknown = parseRequest(R"({
+                "version":2,"operation":"session.replace",
+                "session_id":"one","token":"two","generation":2,
+                "materials":{},"targets":[],
+                "visibility_transitions":[{
+                    "target_id":"bar","transition_id":"hide-1",
+                    "source_generation":1,"direction":"hide",
+                    "edge":"top",
+                    "source_rect":{"x":0,"y":0,"width":1,"height":1},
+                    "source_radius":0,"travel":1,"duration_ms":1,
+                    "easing":"ease-out-cubic",
+                    "anchor":"compositor-monotonic",
+                    "activation":"first-successful-draw",
+                    "timeout_ms":1,"output":"DP-1",
+                    "namespace":"n","secret":"value"
+                }]
+            })");
+            require(!unknown &&
+                        unknown.error().path ==
+                            "visibility_transitions[0].secret",
+                    "unknown visibility field bypassed strict parsing");
+        }},
         Case{"output-local morph endpoints parse without changing legacy morphs", [] {
             const auto result = parseRequest(R"({
                 "version":2,"operation":"session.replace",

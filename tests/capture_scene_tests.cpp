@@ -392,7 +392,8 @@ int main() {
         Case{"presentation scene state is retained", [] {
             PresentationScene input{
                 .presentations = {},
-                .inactive = {{"client:a:s1", "inactive"}},
+                .inactive = {{{"client:a:s1", "inactive"},
+                              TargetInactiveReason::Offscreen}},
                 .suppressed = {{"config", "suppressed"}},
                 .failures = {{
                     .identity = {"client:b:s2", "failed"},

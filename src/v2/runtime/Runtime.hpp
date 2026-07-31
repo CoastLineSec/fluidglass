@@ -4,6 +4,7 @@
 #include "v2/model/PresentationHandoff.hpp"
 #include "v2/model/Readiness.hpp"
 #include "v2/model/Session.hpp"
+#include "v2/model/VisibilityTransition.hpp"
 
 #include <cstdint>
 #include <optional>
@@ -41,6 +42,8 @@ class RuntimeService {
     [[nodiscard]] const ReadinessTracker& readinessTracker() const noexcept;
     [[nodiscard]] PresentationHandoffTracker& handoffTracker() noexcept;
     [[nodiscard]] const PresentationHandoffTracker& handoffTracker() const noexcept;
+    [[nodiscard]] VisibilityTransitionTracker& visibilityTracker() noexcept;
+    [[nodiscard]] const VisibilityTransitionTracker& visibilityTracker() const noexcept;
     void setRendererStatus(RendererRuntimeStatus status) noexcept;
     [[nodiscard]] const RendererRuntimeStatus& rendererStatus() const noexcept;
 
@@ -51,6 +54,7 @@ class RuntimeService {
     SessionManager   m_sessions;
     ReadinessTracker m_readiness;
     PresentationHandoffTracker m_handoffs;
+    VisibilityTransitionTracker m_visibility;
     RendererRuntimeStatus m_rendererStatus;
 };
 
