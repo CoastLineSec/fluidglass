@@ -193,32 +193,17 @@ int main() {
             require(result["result"]["limits"]["transition_ms"] == 60000, "transition limit is missing");
             require(result["result"]["transitions"]["compound_parts"] == true,
                     "part transitions are not advertised");
-            require(result["result"]["presentation_handoffs"]
-                              ["retain_until_drawn"] == true &&
-                        result["result"]["presentation_handoffs"]
-                              ["target_kinds"] == json::array({"layer"}) &&
-                        result["result"]["presentation_handoffs"]
-                              ["geometry_morph"]["layer_targets"] == true &&
-                        result["result"]["presentation_handoffs"]
-                              ["geometry_morph"]["coordinate_spaces"] ==
-                            json::array({"surface-local", "output-local"}) &&
-                        result["result"]["presentation_handoffs"]
-                              ["geometry_morph"]["reversal"] == true &&
-                        result["result"]["limits"]
-                              ["presentation_handoff_ms"] == 2000 &&
-                        result["result"]["limits"]
-                              ["presentation_morph_ms"] == 1000,
-                    "presentation handoff capability is incomplete");
-            require(
-                result["result"]["visibility_transitions"]
-                      ["layer_targets"] == true &&
-                    result["result"]["visibility_transitions"]
-                      ["activation"] == "first-successful-draw" &&
-                    result["result"]["visibility_transitions"]
-                      ["reversal"] == true &&
-                    result["result"]["limits"]
-                      ["visibility_transition_ms"] == 1000,
-                "visibility transition capability is incomplete");
+            // The retired handoff/morph/visibility capability blocks must
+            // stay gone: their presence is what let two protocols coexist.
+            require(!result["result"].contains("presentation_handoffs") &&
+                        !result["result"].contains("visibility_transitions") &&
+                        !result["result"]["limits"]
+                              .contains("presentation_handoff_ms") &&
+                        !result["result"]["limits"]
+                              .contains("presentation_morph_ms") &&
+                        !result["result"]["limits"]
+                              .contains("visibility_transition_ms"),
+                    "a retired capability block is still advertised");
             require(
                 result["result"]["target_readiness"]["inactive_reporting"] ==
                         true &&
@@ -332,8 +317,9 @@ int main() {
             const auto status = call(fixture.runtime, R"({"version":2,"operation":"status"})", 11);
             require(status["result"]["totals"]["sessions"] == 1, "status lost the session");
             require(status["result"]["readiness"]["accepted"] == 1, "accepted target readiness is missing");
-            require(status["result"]["presentation_handoffs"].empty(),
-                    "ordinary replacement reported a handoff");
+            require(!status["result"].contains("presentation_handoffs") &&
+                        !status["result"].contains("visibility_transitions"),
+                    "status still reports a retired protocol aggregate");
             require(status.dump().find(token) == std::string::npos, "status leaked a session token");
 
             const auto heartbeat = call(fixture.runtime, std::string(
@@ -498,84 +484,7 @@ int main() {
                         accepted->state == ReadinessState::Accepted,
                     "replacement target was not accepted fresh");
         }},
-        Case{"handoff retention is separate from successor readiness", [] {
-            Fixture fixture;
-            const auto opened = open(fixture.runtime);
-            const auto sessionId =
-                opened["result"]["session_id"].get<std::string>();
-            const auto token = opened["result"]["token"].get<std::string>();
-            require(call(fixture.runtime,
-                         layerReplacement(sessionId, token, 1), 10)["ok"] ==
-                        true,
-                    "initial layer replacement failed");
-            const auto snapshot = fixture.runtime.sessionManager().snapshot(
-                sessionId);
-            require(snapshot.has_value(), "session snapshot is unavailable");
-            const TargetIdentity identity{
-                .owner = snapshot->owner,
-                .targetId = "bar",
-            };
-            const PresentationKey key{
-                .identity = identity,
-                .output = "DP-1",
-                .outputGeneration = 9,
-                .stage = RenderStage::PostLayer,
-            };
-            auto& readiness = fixture.runtime.readinessTracker();
-            require(readiness.resolvePresentation(key).hasValue() &&
-                        readiness.transition(key, ReadinessState::Attached)
-                            .hasValue() &&
-                        readiness.transition(key,
-                                             ReadinessState::CaptureReady)
-                            .hasValue() &&
-                        readiness.transition(key, ReadinessState::Drawn)
-                            .hasValue(),
-                    "predecessor did not reach drawn");
-
-            const auto replaced = call(
-                fixture.runtime,
-                layerReplacement(sessionId, token, 2, true, 1), 20);
-            require(replaced["ok"] == true &&
-                        replaced["result"]["handoffs"].size() == 1U &&
-                        replaced["result"]["handoffs"][0]["state"] ==
-                            "retained",
-                    "runtime did not accept the exact drawn predecessor");
-            const auto inspect = call(
-                fixture.runtime,
-                std::string(
-                    R"({"version":2,"operation":"target.inspect","session_id":")") +
-                    sessionId + R"(","token":")" + token +
-                    R"(","target_id":"bar"})",
-                21);
-            // Readiness now survives a replace for a retained target, so the
-            // successor inherits the drawn presentation; the handoff record is
-            // still reported separately rather than being folded into it.
-            require(inspect["result"]["presentations"].size() == 1U &&
-                        inspect["result"]["presentations"][0]["state"] ==
-                            "drawn" &&
-                        inspect["result"]["handoff"]["state"] == "retained",
-                    "retained readiness and handoff state were conflated");
-
-            fixture.runtime.handoffTracker().complete(key);
-            const auto status = call(
-                fixture.runtime,
-                R"({"version":2,"operation":"status"})",
-                22);
-            require(status["result"]["readiness"]["accepted"] == 1 &&
-                        status["result"]["presentation_handoffs"]
-                              ["completed"] == 1,
-                    "status merged continuity into readiness");
-            const auto completed = call(
-                fixture.runtime,
-                std::string(
-                    R"({"version":2,"operation":"target.inspect","session_id":")") +
-                    sessionId + R"(","token":")" + token +
-                    R"(","target_id":"bar"})",
-                23);
-            require(completed["result"]["handoff"]["state"] == "completed",
-                    "successor draw did not complete the handoff");
-        }},
-        Case{"rejected handoff preserves the authoritative generation", [] {
+        Case{"retired protocol keys reject the whole replacement", [] {
             Fixture fixture;
             const auto opened = open(fixture.runtime);
             const auto sessionId =
@@ -587,13 +496,13 @@ int main() {
                     "initial layer replacement failed");
             const auto rejected = call(
                 fixture.runtime,
-                layerReplacement(sessionId, token, 2, true, 0), 20);
+                layerReplacement(sessionId, token, 2, true, 1), 20);
             require(rejected["ok"] == false &&
-                        rejected["error"]["code"] == "stale-generation" &&
+                        rejected["error"]["code"] == "invalid-request" &&
                         fixture.runtime.sessionManager()
                                 .snapshot(sessionId)
                                 ->generation == 1,
-                    "rejected handoff changed the authoritative generation");
+                    "a handoffs key must reject the replacement whole");
         }},
         Case{"compound inspection is lossless", [] {
             Fixture fixture;

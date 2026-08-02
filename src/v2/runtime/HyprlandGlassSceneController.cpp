@@ -29,20 +29,10 @@ using PresentationMembership =
 
 PresentationMembership membershipOf(const PresentationScene& scene) {
     PresentationMembership result;
-    std::set<PresentationKey> fallbackKeys;
-    for (const auto& handoff : scene.handoffs)
-        fallbackKeys.insert(handoff.fallback);
     for (const auto& planned : scene.presentations)
-        if (!fallbackKeys.contains(planned.presentation.key))
-            result.emplace(planned.presentation.key,
-                           planned.presentation.attachmentToken);
+        result.emplace(planned.presentation.key,
+                       planned.presentation.attachmentToken);
     return result;
-}
-
-std::string handoffTargetId(const PresentationKey& key,
-                            std::uint64_t sourceGeneration) {
-    return key.identity.targetId + ".handoff." +
-           std::to_string(sourceGeneration);
 }
 
 } // namespace
@@ -171,45 +161,10 @@ Result<void> HyprlandGlassSceneController::refreshResolvedScene(
                                     outputs.value().current);
     if (!targets)
         return Result<void>::failure(targets.error());
-    for (const auto& record : m_runtime.handoffTracker().morphing()) {
-        const auto currentTarget = std::ranges::find_if(
-            targets.value().effective,
-            [&](const ResolvedTarget& target) {
-                return target.attachment.identity == record.identity;
-            });
-        const auto previousTarget = std::ranges::find_if(
-            m_presentations.presentations,
-            [&](const PlannedPresentation& presentation) {
-                return presentation.target.attachment.identity ==
-                    record.identity;
-            });
-        const auto outputCurrent = std::ranges::all_of(
-            record.presentations,
-            [&](const PresentationHandoffPresentation& presentation) {
-                return std::ranges::any_of(
-                    outputs.value().current,
-                    [&](const OutputGeneration& output) {
-                        return output.snapshot.name ==
-                                presentation.key.output &&
-                            output.generation ==
-                                presentation.key.outputGeneration;
-                    });
-            });
-        if (currentTarget == targets.value().effective.end() ||
-            previousTarget == m_presentations.presentations.end() ||
-            currentTarget->attachment.objectToken !=
-                previousTarget->target.attachment.objectToken ||
-            !outputCurrent)
-            m_runtime.handoffTracker().fail(
-                record.identity,
-                "morph presentation identity changed");
-    }
     auto presentations =
         buildPresentationScene(targets.value(),
                                m_runtime.configStore().active(), sessions,
-                               outputs.value().current, nowMs,
-                               &m_runtime.handoffTracker(),
-                               &m_runtime.visibilityTracker());
+                               outputs.value().current, nowMs);
     if (!presentations)
         return Result<void>::failure(presentations.error());
     auto bindings =
@@ -234,7 +189,6 @@ Result<void> HyprlandGlassSceneController::refreshResolvedScene(
         return attached;
     }
 
-    applyPresentationHandoffs(presentations.value(), m_presentations);
 
     const auto previousMembership = membershipOf(m_presentations);
     const auto membershipChanged =
@@ -356,106 +310,8 @@ void HyprlandGlassSceneController::onDrawResult(
         else {
             static_cast<void>(
                 readiness.transition(key, ReadinessState::Drawn));
-            m_runtime.handoffTracker().complete(key);
-            m_runtime.visibilityTracker().activate(key, m_lastNowMs);
         }
     } catch (...) {
-    }
-}
-
-void HyprlandGlassSceneController::onHandoffFallbackFailure(
-    const PresentationKey& successor, std::uint64_t,
-    const Error& error) noexcept {
-    try {
-        m_runtime.handoffTracker().fail(successor, error.message);
-        m_handoffFallbacks.erase(successor);
-    } catch (...) {
-    }
-}
-
-void HyprlandGlassSceneController::applyPresentationHandoffs(
-    PresentationScene& current,
-    const PresentationScene& previous) noexcept {
-    try {
-        auto& tracker = m_runtime.handoffTracker();
-        const auto active = tracker.active();
-        std::set<PresentationKey> retainedKeys;
-        for (const auto& record : active)
-            for (const auto& item : record.presentations)
-                if (item.state == PresentationHandoffState::Retained)
-                    retainedKeys.insert(item.key);
-        std::erase_if(m_handoffFallbacks, [&](const auto& entry) {
-            return !retainedKeys.contains(entry.first);
-        });
-
-        for (const auto& record : active) {
-            for (const auto& item : record.presentations) {
-                if (item.state != PresentationHandoffState::Retained)
-                    continue;
-                const auto successor = std::ranges::find_if(
-                    current.presentations,
-                    [&](const PlannedPresentation& planned) {
-                        return planned.presentation.key == item.key;
-                    });
-                if (successor == current.presentations.end()) {
-                    tracker.fail(item.key,
-                                 "handoff successor presentation is unavailable");
-                    m_handoffFallbacks.erase(item.key);
-                    continue;
-                }
-
-                auto fallback = m_handoffFallbacks.find(item.key);
-                if (fallback == m_handoffFallbacks.end()) {
-                    const auto predecessor = std::ranges::find_if(
-                        previous.presentations,
-                        [&](const PlannedPresentation& planned) {
-                            return planned.presentation.key == item.key;
-                        });
-                    if (predecessor == previous.presentations.end()) {
-                        tracker.fail(item.key,
-                                     "handoff predecessor presentation is unavailable");
-                        continue;
-                    }
-                    auto retained = *predecessor;
-                    const auto internalId =
-                        handoffTargetId(item.key, record.sourceGeneration);
-                    retained.target.definition.id = internalId;
-                    retained.target.attachment.identity.targetId = internalId;
-                    retained.presentation.key.identity.targetId = internalId;
-                    fallback = m_handoffFallbacks
-                                   .insert_or_assign(item.key,
-                                                     std::move(retained))
-                                   .first;
-                }
-
-                const auto& retained = fallback->second;
-                if (successor->target.attachment.kind != TargetKind::Layer ||
-                    retained.target.attachment.kind != TargetKind::Layer ||
-                    successor->target.attachment.objectToken == 0U ||
-                    successor->target.attachment.objectToken !=
-                        retained.target.attachment.objectToken ||
-                    successor->presentation.key.output !=
-                        retained.presentation.key.output ||
-                    successor->presentation.key.outputGeneration !=
-                        retained.presentation.key.outputGeneration ||
-                    successor->presentation.key.stage !=
-                        retained.presentation.key.stage) {
-                    tracker.fail(item.key,
-                                 "handoff presentation identity changed");
-                    m_handoffFallbacks.erase(item.key);
-                    continue;
-                }
-
-                current.handoffs.push_back({
-                    .successor = successor->presentation.key,
-                    .fallback = retained.presentation.key,
-                });
-            }
-        }
-    } catch (...) {
-        m_runtime.handoffTracker().clear();
-        m_runtime.visibilityTracker().clear();
-        m_handoffFallbacks.clear();
     }
 }
 
@@ -511,9 +367,6 @@ void HyprlandGlassSceneController::clearLiveState() noexcept {
         static_cast<void>(m_attachments->clear());
     m_pendingWindows.clear();
     m_capturePresentations.clear();
-    m_handoffFallbacks.clear();
-    m_runtime.handoffTracker().clear();
-    m_runtime.visibilityTracker().clear();
 }
 
 void HyprlandGlassSceneController::publishStatus() noexcept {
@@ -553,7 +406,6 @@ void HyprlandGlassSceneController::clear() noexcept {
     m_currentOutputs.clear();
     m_targets = {};
     m_presentations = {};
-    m_handoffFallbacks.clear();
     m_initialized = false;
     m_renderingReady = false;
     m_lastError.reset();

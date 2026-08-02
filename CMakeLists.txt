@@ -62,11 +62,9 @@ add_library(hyprfluidglass-v2-core STATIC
     src/v2/ipc/Protocol.cpp
     src/v2/model/Config.cpp
     src/v2/model/Material.cpp
-    src/v2/model/PresentationHandoff.cpp
     src/v2/model/Readiness.cpp
     src/v2/model/Session.cpp
     src/v2/model/Target.cpp
-    src/v2/model/VisibilityTransition.cpp
     src/v2/render/CaptureBlit.cpp
     src/v2/render/CaptureCache.cpp
     src/v2/render/CaptureEnvironment.cpp
@@ -172,8 +170,6 @@ if(BUILD_TESTING)
     hfg_test(session SOURCES tests/session_tests.cpp LINK hyprfluidglass-v2-core)
     hfg_test(config SOURCES tests/config_tests.cpp LINK hyprfluidglass-v2-core)
     hfg_test(readiness SOURCES tests/readiness_tests.cpp LINK hyprfluidglass-v2-core)
-    hfg_test(presentation-handoff SOURCES tests/presentation_handoff_tests.cpp LINK hyprfluidglass-v2-core)
-    hfg_test(visibility-transition SOURCES tests/visibility_transition_tests.cpp LINK hyprfluidglass-v2-core)
     hfg_test(output-generation SOURCES tests/output_generation_tests.cpp LINK hyprfluidglass-v2-core)
     hfg_test(geometry SOURCES tests/geometry_tests.cpp LINK hyprfluidglass-v2-core)
     hfg_test(glass-draw-plan SOURCES tests/glass_draw_plan_tests.cpp LINK hyprfluidglass-v2-core)

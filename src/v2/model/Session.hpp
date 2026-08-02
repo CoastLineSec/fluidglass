@@ -29,70 +29,10 @@ struct SessionHandle {
     friend bool operator==(const SessionHandle&, const SessionHandle&) = default;
 };
 
-struct PresentationHandoffRequest {
-    enum class MorphCoordinateSpace {
-        SurfaceLocal,
-        OutputLocal,
-    };
-
-    struct MorphEndpoint {
-        Rect   rect;
-        double radius = 0.0;
-
-        friend bool operator==(const MorphEndpoint&,
-                               const MorphEndpoint&) = default;
-    };
-
-    struct Morph {
-        std::string                 transitionId;
-        std::uint64_t               durationMs = 0;
-        MorphCoordinateSpace        coordinateSpace =
-            MorphCoordinateSpace::SurfaceLocal;
-        std::optional<MorphEndpoint> source = std::nullopt;
-        std::optional<MorphEndpoint> destination = std::nullopt;
-
-        friend bool operator==(const Morph&, const Morph&) = default;
-    };
-
-    std::string   targetId;
-    std::uint64_t sourceGeneration = 0;
-    std::uint64_t timeoutMs = 0;
-    std::optional<Morph> morph = std::nullopt;
-
-    friend bool operator==(const PresentationHandoffRequest&,
-                           const PresentationHandoffRequest&) = default;
-};
-
-enum class VisibilityTransitionDirection {
-    Hide,
-    Reveal,
-};
-
-struct VisibilityTransitionRequest {
-    std::string                   targetId;
-    std::string                   transitionId;
-    std::uint64_t                 sourceGeneration = 0;
-    VisibilityTransitionDirection direction =
-        VisibilityTransitionDirection::Hide;
-    TransitionEdge                edge = TransitionEdge::Top;
-    Rect                          sourceRect;
-    double                        sourceRadius = 0.0;
-    double                        travel = 0.0;
-    std::uint64_t                 durationMs = 0;
-    std::uint64_t                 timeoutMs = 0;
-    std::string                   output;
-    std::string                   namespaceName;
-
-    friend bool operator==(const VisibilityTransitionRequest&,
-                           const VisibilityTransitionRequest&) = default;
-};
-
 struct SessionReplacement {
     std::uint64_t                generation = 0;
     std::map<std::string, Material> materials;
     std::vector<Target>          targets;
-    std::vector<PresentationHandoffRequest> handoffs = {};
-    std::vector<VisibilityTransitionRequest> visibilityTransitions = {};
 };
 
 struct SessionSnapshot {

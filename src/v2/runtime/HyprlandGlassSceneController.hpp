@@ -48,9 +48,6 @@ class HyprlandGlassSceneController final
     void onDrawResult(const PresentationKey& key,
                       std::uint64_t frameToken,
                       const std::optional<Error>& error) noexcept override;
-    void onHandoffFallbackFailure(
-        const PresentationKey& successor, std::uint64_t frameToken,
-        const Error& error) noexcept override;
 
     [[nodiscard]] bool renderingReady() const noexcept;
     [[nodiscard]] const std::optional<Error>& lastError() const noexcept;
@@ -71,9 +68,6 @@ class HyprlandGlassSceneController final
     void reconcileReadiness(
         const std::set<std::pair<PresentationKey, std::uint64_t>>&
             previousMembership);
-    void applyPresentationHandoffs(
-        PresentationScene& current,
-        const PresentationScene& previous) noexcept;
     void recordFailure(Error error) noexcept;
     void publishStatus() noexcept;
     void clearLiveState() noexcept;
@@ -91,7 +85,6 @@ class HyprlandGlassSceneController final
     std::vector<OutputGeneration> m_currentOutputs;
     TargetScene m_targets;
     PresentationScene m_presentations;
-    std::map<PresentationKey, PlannedPresentation> m_handoffFallbacks;
     std::map<std::string, RenderHookEvent, std::less<>> m_pendingWindows;
     std::map<std::uint64_t, std::vector<PresentationKey>> m_capturePresentations;
     std::optional<Error> m_lastError;

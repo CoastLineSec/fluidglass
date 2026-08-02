@@ -27,9 +27,6 @@ struct Limits {
     static constexpr std::uint64_t PREVIEW_LEASE_MS        = 5'000U;
     static constexpr std::uint64_t SESSION_TOMBSTONE_MS    = 2'000U;
     static constexpr std::uint64_t MAX_TRANSITION_MS        = 60'000U;
-    static constexpr std::uint64_t MAX_PRESENTATION_HANDOFF_MS = 2'000U;
-    static constexpr std::uint64_t MAX_PRESENTATION_MORPH_MS   = 1'000U;
-    static constexpr std::uint64_t MAX_VISIBILITY_TRANSITION_MS = 1'000U;
 };
 
 } // namespace hfg::v2

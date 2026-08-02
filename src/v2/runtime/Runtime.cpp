@@ -276,38 +276,6 @@ json capabilitiesJson(const RendererRuntimeStatus& renderer) {
             {"targets", true},
             {"compound_parts", true},
         }},
-        {"presentation_handoffs", {
-            {"retain_until_drawn", true},
-            {"target_kinds", json::array({"layer"})},
-            {"geometry_morph", {
-                {"layer_targets", true},
-                {"coordinate_space", "surface-local"},
-                {"coordinate_spaces", json::array({
-                    "surface-local",
-                    "output-local",
-                })},
-                {"shapes", json::array({"rounded-rect-uniform-radius"})},
-                {"easings", json::array({"ease-out-cubic"})},
-                {"anchor", "compositor-monotonic"},
-                {"reversal", true},
-                {"max_active_per_target", 1},
-                {"max_active", Limits::MAX_DYNAMIC_TARGETS},
-            }},
-        }},
-        {"visibility_transitions", {
-            {"layer_targets", true},
-            {"translation", true},
-            {"opacity", true},
-            {"activation", "first-successful-draw"},
-            {"anchor", "compositor-monotonic"},
-            {"easings", json::array({"ease-out-cubic"})},
-            {"reversal", true},
-            {"supersession", true},
-            {"max_active_per_target", 1},
-            {"max_active", Limits::MAX_DYNAMIC_TARGETS},
-            {"maximum_duration_ms",
-             Limits::MAX_VISIBILITY_TRANSITION_MS},
-        }},
         {"output_liveness", {
             // status.outputs[]: one row per renderer-known output, held
             // continuously — the client contract for the glass/neutral gate.
@@ -347,10 +315,6 @@ json capabilitiesJson(const RendererRuntimeStatus& renderer) {
             {"compound_connectors", Limits::MAX_COMPOUND_CONNECTORS},
             {"bezier_segments", Limits::MAX_BEZIER_SEGMENTS},
             {"transition_ms", Limits::MAX_TRANSITION_MS},
-            {"presentation_handoff_ms", Limits::MAX_PRESENTATION_HANDOFF_MS},
-            {"presentation_morph_ms", Limits::MAX_PRESENTATION_MORPH_MS},
-            {"visibility_transition_ms",
-             Limits::MAX_VISIBILITY_TRANSITION_MS},
         }},
     };
 }
@@ -359,13 +323,9 @@ json statusJson(
     const ConfigStore& config,
     const SessionManager& sessions,
     const ReadinessTracker& readiness,
-    const PresentationHandoffTracker& handoffs,
-    const VisibilityTransitionTracker& visibility,
     const RendererRuntimeStatus& renderer) {
     json sessionList = json::array();
     std::map<std::string_view, std::size_t> readinessTotals;
-    std::map<std::string_view, std::size_t> handoffTotals;
-    std::map<std::string_view, std::size_t> morphTotals;
     for (const auto& snapshot : sessions.snapshots()) {
         sessionList.push_back({
             {"owner", snapshot.owner},
@@ -383,33 +343,12 @@ json statusJson(
                 static_cast<void>(key);
                 ++readinessTotals[readinessStateName(record.state)];
             }
-            if (const auto handoff = handoffs.target(identity)) {
-                for (const auto& presentation : handoff->presentations)
-                    ++handoffTotals[
-                        presentationHandoffStateName(presentation.state)];
-                if (handoff->morph)
-                    ++morphTotals[
-                        presentationMorphStateName(handoff->morph->state)];
-            }
         }
     }
 
     json readinessJson = json::object();
     for (const auto& [state, count] : readinessTotals)
         readinessJson[std::string(state)] = count;
-    json handoffJson = json::object();
-    for (const auto& [state, count] : handoffTotals)
-        handoffJson[std::string(state)] = count;
-    json morphJson = json::object();
-    for (const auto& [state, count] : morphTotals)
-        morphJson[std::string(state)] = count;
-    std::map<std::string_view, std::size_t> visibilityTotals;
-    for (const auto& record : visibility.records())
-        ++visibilityTotals[
-            visibilityTransitionStateName(record.state)];
-    json visibilityJson = json::object();
-    for (const auto& [state, count] : visibilityTotals)
-        visibilityJson[std::string(state)] = count;
 
     // One verdict per output: whether glass is drawing there. A client that
     // derives no geometry needs nothing finer than this to choose between glass
@@ -463,42 +402,6 @@ json statusJson(
         }},
         {"readiness", std::move(readinessJson)},
         {"outputs", std::move(outputsJson)},
-        {"presentation_handoffs", std::move(handoffJson)},
-        {"presentation_morphs", std::move(morphJson)},
-        {"visibility_transitions", std::move(visibilityJson)},
-    };
-}
-
-json visibilityJson(const VisibilityTransitionRecord& record) {
-    return {
-        {"target_id", record.identity.targetId},
-        {"transition_id", record.transitionId},
-        {"source_generation", record.sourceGeneration},
-        {"successor_generation", record.successorGeneration},
-        {"direction",
-         visibilityTransitionDirectionName(record.direction)},
-        {"state", visibilityTransitionStateName(record.state)},
-        {"anchor_ms", record.anchorMs},
-        {"duration_ms", record.durationMs},
-        {"easing", "ease-out-cubic"},
-        {"activation", "first-successful-draw"},
-        {"starting_progress", record.startingProgress},
-        {"source_offset", {
-            {"x", record.sourceOffset.x},
-            {"y", record.sourceOffset.y},
-        }},
-        {"destination_offset", {
-            {"x", record.destinationOffset.x},
-            {"y", record.destinationOffset.y},
-        }},
-        {"source_opacity", record.sourceOpacity},
-        {"destination_opacity", record.destinationOpacity},
-        {"output", record.output},
-        {"output_generation",
-         record.outputGeneration
-             ? json(*record.outputGeneration)
-             : json(nullptr)},
-        {"detail", record.detail},
     };
 }
 
@@ -513,74 +416,9 @@ json presentationJson(const PresentationKey& key, const ReadinessRecord& record)
     };
 }
 
-json handoffJson(const PresentationHandoffRecord& handoff) {
-    json presentations = json::array();
-    bool retained = false;
-    bool failed = false;
-    for (const auto& presentation : handoff.presentations) {
-        retained = retained ||
-            presentation.state == PresentationHandoffState::Retained;
-        failed = failed ||
-            presentation.state == PresentationHandoffState::Failed;
-        presentations.push_back({
-            {"output", presentation.key.output},
-            {"output_generation", presentation.key.outputGeneration},
-            {"stage", renderStageName(presentation.key.stage)},
-            {"state", presentationHandoffStateName(presentation.state)},
-            {"detail", presentation.detail},
-        });
-    }
-    const auto state = retained
-        ? PresentationHandoffState::Retained
-        : failed
-            ? PresentationHandoffState::Failed
-            : PresentationHandoffState::Completed;
-    json morph = nullptr;
-    if (handoff.morph) {
-        const auto endpointJson = [](const PresentationMorphEndpoint& endpoint) {
-            return json{
-                {"rect", {
-                    {"x", endpoint.rect.x},
-                    {"y", endpoint.rect.y},
-                    {"width", endpoint.rect.width},
-                    {"height", endpoint.rect.height},
-                }},
-                {"radius", endpoint.radius},
-            };
-        };
-        morph = {
-            {"transition_id", handoff.morph->transitionId},
-            {"state", presentationMorphStateName(handoff.morph->state)},
-            {"coordinate_space",
-             handoff.morph->coordinateSpace ==
-                     PresentationHandoffRequest::MorphCoordinateSpace::
-                         OutputLocal
-                 ? "output-local"
-                 : "surface-local"},
-            {"anchor_ms", handoff.morph->anchorMs},
-            {"duration_ms", handoff.morph->durationMs},
-            {"easing", "ease-out-cubic"},
-            {"source", endpointJson(handoff.morph->source)},
-            {"destination", endpointJson(handoff.morph->destination)},
-            {"detail", handoff.morph->detail},
-        };
-    }
-    return {
-        {"target_id", handoff.identity.targetId},
-        {"source_generation", handoff.sourceGeneration},
-        {"successor_generation", handoff.successorGeneration},
-        {"expires_at_ms", handoff.expiresAtMs},
-        {"state", presentationHandoffStateName(state)},
-        {"presentations", std::move(presentations)},
-        {"morph", std::move(morph)},
-    };
-}
-
 Result<json> inspectTarget(
     SessionManager& sessions,
     const ReadinessTracker& readiness,
-    const PresentationHandoffTracker& handoffs,
-    const VisibilityTransitionTracker& visibility,
     const InspectTargetRequest& request,
     std::uint64_t nowMs) {
     auto snapshot = sessions.inspect(request.sessionId, request.token, nowMs);
@@ -606,12 +444,6 @@ Result<json> inspectTarget(
         presentations.push_back(presentationJson(key, record));
 
     const auto targetState = readiness.target(identity);
-    json handoff = nullptr;
-    if (const auto record = handoffs.target(identity))
-        handoff = handoffJson(*record);
-    json visibilityTransition = nullptr;
-    if (const auto record = visibility.target(identity))
-        visibilityTransition = visibilityJson(*record);
     // "inactive" carries no error, so the reason is the only thing that tells
     // a client whether to keep waiting or to stop.
     json detail = nullptr;
@@ -624,8 +456,6 @@ Result<json> inspectTarget(
         {"state", targetState ? readinessStateName(targetState->state) : "accepted"},
         {"detail", std::move(detail)},
         {"presentations", std::move(presentations)},
-        {"handoff", std::move(handoff)},
-        {"visibility_transition", std::move(visibilityTransition)},
     });
 }
 
@@ -634,8 +464,6 @@ Result<json> dispatchRequest(
     ConfigStore& config,
     SessionManager& sessions,
     ReadinessTracker& readiness,
-    PresentationHandoffTracker& handoffs,
-    VisibilityTransitionTracker& visibility,
     const RendererRuntimeStatus& renderer,
     std::uint64_t nowMs) {
     return std::visit([&](const auto& body) -> Result<json> {
@@ -644,9 +472,7 @@ Result<json> dispatchRequest(
             return Result<json>::success(capabilitiesJson(renderer));
         } else if constexpr (std::is_same_v<T, StatusRequest>) {
             return Result<json>::success(
-                statusJson(
-                    config, sessions, readiness, handoffs, visibility,
-                    renderer));
+                statusJson(config, sessions, readiness, renderer));
         } else if constexpr (std::is_same_v<T, OpenSessionRequest>) {
             auto opened = sessions.open(body.clientId, body.mode, nowMs);
             if (!opened)
@@ -654,26 +480,6 @@ Result<json> dispatchRequest(
             return Result<json>::success(handleJson(opened.value()));
         } else if constexpr (std::is_same_v<T, ReplaceSessionRequest>) {
             const auto previous = sessions.snapshot(body.sessionId);
-            const auto owner = previous ? previous->owner : std::string{};
-            std::vector<PreparedPresentationHandoff> prepared;
-            if (previous) {
-                auto preparation = handoffs.prepare(
-                    *previous,
-                    body.replacement,
-                    readiness,
-                    nowMs);
-                if (!preparation)
-                    return Result<json>::failure(preparation.error());
-                prepared = std::move(preparation.value());
-            }
-            auto visibilityPreparation = visibility.prepare(
-                previous,
-                body.replacement,
-                owner,
-                nowMs);
-            if (!visibilityPreparation)
-                return Result<json>::failure(
-                    visibilityPreparation.error());
             auto replaced = sessions.replace(
                 body.sessionId,
                 body.token,
@@ -682,25 +488,6 @@ Result<json> dispatchRequest(
                 nowMs);
             if (!replaced)
                 return Result<json>::failure(replaced.error());
-
-            handoffs.commit(
-                replaced.value().owner,
-                replaced.value().generation,
-                prepared,
-                nowMs);
-            visibility.commit(
-                std::move(visibilityPreparation.value()));
-            for (const auto& record : visibility.records()) {
-                if (record.identity.owner != replaced.value().owner)
-                    continue;
-                const auto retained = std::ranges::any_of(
-                    replaced.value().targets,
-                    [&](const Target& target) {
-                        return target.id == record.identity.targetId;
-                    });
-                if (!retained)
-                    visibility.erase(record.identity);
-            }
 
             // Readiness survives a replace for every target the successor
             // generation retains. Erasing them all would blink each output's
@@ -726,32 +513,12 @@ Result<json> dispatchRequest(
                 if (!accepted)
                     return Result<json>::failure(accepted.error());
             }
-            json retained = json::array();
-            for (const auto& item : prepared) {
-                const auto record = handoffs.target(item.identity);
-                if (record)
-                    retained.push_back(handoffJson(*record));
-            }
-            json acceptedVisibility = json::array();
-            for (const auto& request :
-                 body.replacement.visibilityTransitions) {
-                const auto record = visibility.target({
-                    .owner = replaced.value().owner,
-                    .targetId = request.targetId,
-                });
-                if (record)
-                    acceptedVisibility.push_back(
-                        visibilityJson(*record));
-            }
             return Result<json>::success({
                 {"owner", replaced.value().owner},
                 {"generation", replaced.value().generation},
                 {"expires_at_ms", replaced.value().expiresAtMs},
                 {"materials", replaced.value().materials.size()},
                 {"targets", replaced.value().targets.size()},
-                {"handoffs", std::move(retained)},
-                {"visibility_transitions",
-                 std::move(acceptedVisibility)},
             });
         } else if constexpr (std::is_same_v<T, HeartbeatSessionRequest>) {
             auto renewed = sessions.heartbeat(
@@ -770,14 +537,9 @@ Result<json> dispatchRequest(
             if (previous)
                 for (const auto& target : previous->targets)
                     readiness.erase({.owner = previous->owner, .targetId = target.id});
-            if (previous)
-                handoffs.eraseOwner(previous->owner);
-            if (previous)
-                visibility.eraseOwner(previous->owner);
             return Result<json>::success({{"closed", true}});
         } else {
-            return inspectTarget(
-                sessions, readiness, handoffs, visibility, body, nowMs);
+            return inspectTarget(sessions, readiness, body, nowMs);
         }
     }, request.body);
 }
@@ -797,8 +559,7 @@ std::string RuntimeService::handle(std::string_view payload, std::uint64_t nowMs
         if (!request)
             return failureResponse(std::nullopt, request.error());
         auto result = dispatchRequest(request.value(), m_config, m_sessions,
-                                      m_readiness, m_handoffs, m_visibility,
-                                      m_rendererStatus, nowMs);
+                                      m_readiness, m_rendererStatus, nowMs);
         if (!result)
             return failureResponse(request.value().requestId, result.error());
         return successResponse(request.value().requestId, result.value());
@@ -810,8 +571,6 @@ std::string RuntimeService::handle(std::string_view payload, std::uint64_t nowMs
 void RuntimeService::tick(std::uint64_t nowMs) noexcept {
     try {
         expireSessions(nowMs);
-        m_handoffs.expire(nowMs);
-        m_visibility.expire(nowMs);
     } catch (...) {
     }
 }
@@ -840,23 +599,6 @@ const ReadinessTracker& RuntimeService::readinessTracker() const noexcept {
     return m_readiness;
 }
 
-PresentationHandoffTracker& RuntimeService::handoffTracker() noexcept {
-    return m_handoffs;
-}
-
-const PresentationHandoffTracker& RuntimeService::handoffTracker() const noexcept {
-    return m_handoffs;
-}
-
-VisibilityTransitionTracker& RuntimeService::visibilityTracker() noexcept {
-    return m_visibility;
-}
-
-const VisibilityTransitionTracker&
-RuntimeService::visibilityTracker() const noexcept {
-    return m_visibility;
-}
-
 void RuntimeService::setRendererStatus(RendererRuntimeStatus status) noexcept {
     m_rendererStatus = std::move(status);
 }
@@ -872,8 +614,6 @@ void RuntimeService::expireSessions(std::uint64_t nowMs) {
                 .owner = expired.owner,
                 .targetId = targetId,
             });
-        m_handoffs.eraseOwner(expired.owner);
-        m_visibility.eraseOwner(expired.owner);
     }
 }
 

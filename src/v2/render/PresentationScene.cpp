@@ -35,225 +35,6 @@ const OutputGeneration* findOutput(
     return nullptr;
 }
 
-Result<ResolvedTarget> applyPresentationMorph(
-    ResolvedTarget target,
-    PresentationHandoffTracker* handoffs,
-    std::span<const OutputGeneration> outputs,
-    std::uint64_t nowMs) {
-    if (!handoffs)
-        return Result<ResolvedTarget>::success(std::move(target));
-    const auto record = handoffs->target(target.attachment.identity);
-    if (!record || !record->morph ||
-        (record->morph->state != PresentationMorphState::Active &&
-         record->morph->state != PresentationMorphState::Settling))
-        return Result<ResolvedTarget>::success(std::move(target));
-    if (target.attachment.kind != TargetKind::Layer ||
-        !target.definition.geometry ||
-        !std::holds_alternative<RoundedRectShape>(
-            target.definition.shape))
-        return Result<ResolvedTarget>::failure({
-            .code = ErrorCode::UnsupportedTarget,
-            .path = "presentation.morph",
-            .message = "active morph no longer references a rounded layer target",
-        });
-    auto resolved = resolvePresentationMorph(*record->morph, nowMs);
-    if (!resolved)
-        return Result<ResolvedTarget>::failure(resolved.error());
-    const auto destination = *target.definition.geometry;
-    const auto surfaceOriginX =
-        target.attachment.globalGeometry.x - destination.x;
-    const auto surfaceOriginY =
-        target.attachment.globalGeometry.y - destination.y;
-    const auto coordinateSpace = record->morph->coordinateSpace;
-    const OutputGeneration* output = nullptr;
-    if (coordinateSpace ==
-        PresentationHandoffRequest::MorphCoordinateSpace::OutputLocal) {
-        if (!target.attachment.outputFilter)
-            return Result<ResolvedTarget>::failure({
-                .code = ErrorCode::UnresolvedTarget,
-                .path = "presentation.morph.output",
-                .message = "output-local morph has no resolved output",
-            });
-        const auto found = std::ranges::find(
-            outputs,
-            *target.attachment.outputFilter,
-            [](const OutputGeneration& candidate) {
-                return candidate.snapshot.name;
-            });
-        if (found == outputs.end())
-            return Result<ResolvedTarget>::failure({
-                .code = ErrorCode::StaleGeneration,
-                .path = "presentation.morph.output",
-                .message = "output-local morph references a non-current output",
-            });
-        output = &*found;
-    }
-    const auto global = [&](const Rect& rect) {
-        if (output)
-            return Rect{
-                .x = output->snapshot.logicalX + rect.x,
-                .y = output->snapshot.logicalY + rect.y,
-                .width = rect.width,
-                .height = rect.height,
-            };
-        return Rect{
-            .x = surfaceOriginX + rect.x,
-            .y = surfaceOriginY + rect.y,
-            .width = rect.width,
-            .height = rect.height,
-        };
-    };
-    const auto contains = [](const Rect& bounds, const Rect& rect) {
-        constexpr double EPSILON = 0.001;
-        return rect.x >= bounds.x - EPSILON &&
-            rect.y >= bounds.y - EPSILON &&
-            rect.x + rect.width <=
-                bounds.x + bounds.width + EPSILON &&
-            rect.y + rect.height <=
-                bounds.y + bounds.height + EPSILON;
-    };
-    const auto intersects = [](const Rect& left, const Rect& right) {
-        return left.x < right.x + right.width &&
-            left.x + left.width > right.x &&
-            left.y < right.y + right.height &&
-            left.y + left.height > right.y;
-    };
-    const auto nearlyEqual = [](const Rect& left, const Rect& right) {
-        constexpr double EPSILON = 0.001;
-        return std::abs(left.x - right.x) <= EPSILON &&
-            std::abs(left.y - right.y) <= EPSILON &&
-            std::abs(left.width - right.width) <= EPSILON &&
-            std::abs(left.height - right.height) <= EPSILON;
-    };
-    if (output) {
-        const Rect outputBounds{
-            .x = output->snapshot.logicalX,
-            .y = output->snapshot.logicalY,
-            .width = output->snapshot.logicalWidth,
-            .height = output->snapshot.logicalHeight,
-        };
-        const auto currentGlobal = global(resolved.value().current.rect);
-        const auto envelopeGlobal = global(resolved.value().envelope);
-        if (!contains(outputBounds, currentGlobal) ||
-            !contains(outputBounds, envelopeGlobal))
-            return Result<ResolvedTarget>::failure({
-                .code = ErrorCode::InvalidTarget,
-                .path = "presentation.morph.output",
-                .message = "output-local morph is outside its output",
-            });
-        if (!target.attachment.containerGlobalGeometry ||
-            !intersects(*target.attachment.containerGlobalGeometry,
-                        currentGlobal))
-            return Result<ResolvedTarget>::failure({
-                .code = ErrorCode::UnresolvedTarget,
-                .path = "presentation.morph.surface",
-                .message = "output-local morph does not intersect its live layer surface",
-            });
-        const auto destinationGlobal =
-            global(record->morph->destination.rect);
-        const auto destinationMatches =
-            nearlyEqual(target.attachment.globalGeometry,
-                        destinationGlobal) &&
-            std::get<RoundedRectShape>(target.definition.shape).radius ==
-                record->morph->destination.radius;
-        if (resolved.value().progress >= 1.0 &&
-            destinationMatches) {
-            handoffs->settleMorph(target.attachment.identity);
-            return Result<ResolvedTarget>::success(std::move(target));
-        }
-    }
-    target.definition.geometry = resolved.value().current.rect;
-    target.definition.shape = RoundedRectShape{
-        .radius = resolved.value().current.radius,
-    };
-    target.attachment.globalGeometry =
-        global(resolved.value().current.rect);
-    target.transitionEnvelopeGlobal =
-        global(resolved.value().envelope);
-    target.transitionAnchorMs = record->morph->anchorMs;
-    target.transitionActive =
-        target.transitionActive || resolved.value().active ||
-        record->morph->state == PresentationMorphState::Settling;
-    return Result<ResolvedTarget>::success(std::move(target));
-}
-
-Result<ResolvedTarget> applyVisibilityTransition(
-    ResolvedTarget target,
-    VisibilityTransitionTracker* visibility,
-    std::span<const OutputGeneration> outputs,
-    std::uint64_t nowMs) {
-    if (!visibility)
-        return Result<ResolvedTarget>::success(std::move(target));
-    const auto record = visibility->target(target.attachment.identity);
-    if (!record ||
-        (record->state != VisibilityTransitionState::Armed &&
-         record->state != VisibilityTransitionState::Active &&
-         record->state != VisibilityTransitionState::Completed))
-        return Result<ResolvedTarget>::success(std::move(target));
-    if (target.attachment.kind != TargetKind::Layer ||
-        !target.attachment.outputFilter)
-        return Result<ResolvedTarget>::failure({
-            .code = ErrorCode::UnsupportedTarget,
-            .path = "visibility_transition.target",
-            .message = "visibility transition requires a resolved layer target",
-        });
-    const auto output = std::ranges::find(
-        outputs, *target.attachment.outputFilter,
-        [](const OutputGeneration& candidate) {
-            return candidate.snapshot.name;
-        });
-    if (output == outputs.end())
-        return Result<ResolvedTarget>::failure({
-            .code = ErrorCode::StaleGeneration,
-            .path = "visibility_transition.output",
-            .message = "visibility transition output is no longer current",
-        });
-    if (!visibility->bind(
-            target.attachment.identity,
-            output->snapshot.name,
-            output->generation,
-            target.attachment.objectToken))
-        return Result<ResolvedTarget>::failure({
-            .code = ErrorCode::StaleGeneration,
-            .path = "visibility_transition.lifetime",
-            .message = "visibility transition surface or output changed",
-        });
-    auto sample = visibility->sample(target.attachment.identity, nowMs);
-    if (!sample)
-        return Result<ResolvedTarget>::failure(sample.error());
-    target.attachment.globalGeometry = {
-        .x = output->snapshot.logicalX + record->sourceRect.x +
-            sample.value().offset.x,
-        .y = output->snapshot.logicalY + record->sourceRect.y +
-            sample.value().offset.y,
-        .width = record->sourceRect.width,
-        .height = record->sourceRect.height,
-    };
-    target.attachment.opacity *= sample.value().opacity;
-    target.definition.shape = RoundedRectShape{
-        .radius = record->sourceRadius,
-    };
-    target.transitionEnvelopeGlobal = Rect{
-        .x = output->snapshot.logicalX +
-            record->sourceRect.x +
-            std::min(record->sourceOffset.x,
-                     record->destinationOffset.x),
-        .y = output->snapshot.logicalY +
-            record->sourceRect.y +
-            std::min(record->sourceOffset.y,
-                     record->destinationOffset.y),
-        .width = record->sourceRect.width +
-            std::abs(record->destinationOffset.x -
-                     record->sourceOffset.x),
-        .height = record->sourceRect.height +
-            std::abs(record->destinationOffset.y -
-                     record->sourceOffset.y),
-    };
-    target.transitionAnchorMs = record->anchorMs;
-    target.transitionActive = sample.value().active;
-    return Result<ResolvedTarget>::success(std::move(target));
-}
-
 } // namespace
 
 Result<PresentationScene>
@@ -262,9 +43,7 @@ buildPresentationScene(
     const ConfigSnapshot* config,
     std::span<const SessionSnapshot> sessions,
     std::span<const OutputGeneration> outputs,
-    std::uint64_t nowMs,
-    PresentationHandoffTracker* handoffs,
-    VisibilityTransitionTracker* visibility) {
+    std::uint64_t nowMs) {
     if (targets.effective.size() >
         Limits::MAX_COMPOSITOR_OBJECTS)
         return failure(
@@ -303,7 +82,6 @@ buildPresentationScene(
 
     PresentationScene scene{
         .presentations = {},
-        .handoffs = {},
         .inactive = targets.inactive,
         .suppressed = targets.suppressed,
         .failures = targets.failures,
@@ -325,30 +103,6 @@ buildPresentationScene(
 
         auto movingTarget = resolveTargetMotion(
             target,
-            nowMs);
-        if (!movingTarget) {
-            scene.failures.push_back({
-                .identity = identity,
-                .error = movingTarget.error(),
-            });
-            continue;
-        }
-        movingTarget = applyPresentationMorph(
-            std::move(movingTarget.value()),
-            handoffs,
-            outputs,
-            nowMs);
-        if (!movingTarget) {
-            scene.failures.push_back({
-                .identity = identity,
-                .error = movingTarget.error(),
-            });
-            continue;
-        }
-        movingTarget = applyVisibilityTransition(
-            std::move(movingTarget.value()),
-            visibility,
-            outputs,
             nowMs);
         if (!movingTarget) {
             scene.failures.push_back({

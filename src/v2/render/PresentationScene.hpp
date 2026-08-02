@@ -3,9 +3,7 @@
 #include "v2/core/Result.hpp"
 #include "v2/model/Config.hpp"
 #include "v2/model/Material.hpp"
-#include "v2/model/PresentationHandoff.hpp"
 #include "v2/model/Session.hpp"
-#include "v2/model/VisibilityTransition.hpp"
 #include "v2/render/MaterialSampling.hpp"
 #include "v2/render/OutputGeneration.hpp"
 #include "v2/targets/Attachment.hpp"
@@ -35,17 +33,8 @@ struct PlannedPresentation {
         const PlannedPresentation&) = default;
 };
 
-struct PresentationHandoffPair {
-    PresentationKey successor;
-    PresentationKey fallback;
-
-    friend bool operator==(const PresentationHandoffPair&,
-                           const PresentationHandoffPair&) = default;
-};
-
 struct PresentationScene {
     std::vector<PlannedPresentation>     presentations;
-    std::vector<PresentationHandoffPair> handoffs = {};
     std::vector<InactiveTarget>          inactive;
     std::vector<TargetIdentity>          suppressed;
     std::vector<TargetResolutionFailure> failures;
@@ -83,8 +72,6 @@ buildPresentationScene(
     const ConfigSnapshot* config,
     std::span<const SessionSnapshot> sessions,
     std::span<const OutputGeneration> outputs,
-    std::uint64_t nowMs,
-    PresentationHandoffTracker* handoffs = nullptr,
-    VisibilityTransitionTracker* visibility = nullptr);
+    std::uint64_t nowMs);
 
 } // namespace hfg::v2

@@ -87,18 +87,6 @@ void reportDraw(const std::shared_ptr<HyprlandGlassPassExecutionState> &executio
   }
 }
 
-void reportHandoffFallbackFailure(
-    const std::shared_ptr<HyprlandGlassPassExecutionState> &execution,
-    const PresentationKey &successor, std::uint64_t frameToken,
-    const Error &error) noexcept {
-  try {
-    if (execution)
-      if (const auto observer = execution->observer.lock())
-        observer->onHandoffFallbackFailure(successor, frameToken, error);
-  } catch (...) {
-  }
-}
-
 std::shared_ptr<HyprlandGlassBlur> blurFor(
     const std::shared_ptr<HyprlandGlassPassExecutionState> &execution,
     const PresentationKey &key) {
@@ -201,15 +189,10 @@ class V2GlassPass final : public IPassElement {
 public:
   V2GlassPass(std::shared_ptr<HyprlandGlassPassExecutionState> execution,
               GlassDrawPlan plan, OutputGeneration output,
-              std::uint64_t frameToken,
-              std::optional<GlassDrawPlan> fallback = std::nullopt)
+              std::uint64_t frameToken)
       : m_execution(std::move(execution)), m_plan(std::move(plan)),
         m_output(std::move(output)), m_frameToken(frameToken),
-        m_blur(blurFor(m_execution, m_plan.key)),
-        m_fallback(std::move(fallback)),
-        m_fallbackBlur(m_fallback
-                           ? blurFor(m_execution, m_fallback->key)
-                           : nullptr) {}
+        m_blur(blurFor(m_execution, m_plan.key)) {}
 
   bool needsLiveBlur() override { return false; }
   bool needsPrecomputeBlur() override { return false; }
@@ -241,23 +224,6 @@ public:
                                           .message = "glass draw did not produce a presentation",
                                       }
                                     : drawn.error();
-      if (m_fallback) {
-        auto fallbackDrawn = draw(*m_fallback, m_fallbackBlur, false);
-        if (fallbackDrawn && fallbackDrawn.value()) {
-          reportDraw(m_execution, m_plan.key, m_frameToken, primaryError);
-          return {};
-        }
-        const auto fallbackError = fallbackDrawn
-                                       ? Error{
-                                             .code = ErrorCode::StaleGeneration,
-                                             .path = "handoff.fallback",
-                                             .message = "retained presentation did not produce a draw",
-                                         }
-                                       : fallbackDrawn.error();
-        logPassFailure(passName(), fallbackError);
-        reportHandoffFallbackFailure(m_execution, m_plan.key, m_frameToken,
-                                     fallbackError);
-      }
       logPassFailure(passName(), primaryError);
       reportDraw(m_execution, m_plan.key, m_frameToken, primaryError);
     } catch (const std::exception &error) {
@@ -282,10 +248,8 @@ public:
 
 private:
   Result<bool> draw(const GlassDrawPlan &plan,
-                    const std::shared_ptr<HyprlandGlassBlur> &blur,
-                    bool requireCurrentCapture = true) {
-    if (requireCurrentCapture &&
-        !m_execution->captures.ready(plan.resourceToken, m_frameToken))
+                    const std::shared_ptr<HyprlandGlassBlur> &blur) {
+    if (!m_execution->captures.ready(plan.resourceToken, m_frameToken))
       return Result<bool>::failure({
           .code = ErrorCode::StaleGeneration,
           .path = "capture",
@@ -299,12 +263,6 @@ private:
           .code = ErrorCode::StaleGeneration,
           .path = "resource",
           .message = "draw allocation changed before pass execution",
-      });
-    if (!requireCurrentCapture && !resource->initialized())
-      return Result<bool>::failure({
-          .code = ErrorCode::StaleGeneration,
-          .path = "handoff.fallback.capture",
-          .message = "retained presentation capture is not initialized",
       });
     if (!blur)
       return Result<bool>::failure({
@@ -321,8 +279,6 @@ private:
   OutputGeneration m_output;
   std::uint64_t m_frameToken = 0;
   std::shared_ptr<HyprlandGlassBlur> m_blur;
-  std::optional<GlassDrawPlan> m_fallback;
-  std::shared_ptr<HyprlandGlassBlur> m_fallbackBlur;
 };
 
 Result<std::vector<PixelRect>>
@@ -378,64 +334,15 @@ HyprlandGlassPassCoordinator::reconcile(const CaptureScene &captures,
         "glass pass execution state is unavailable");
 
   auto resources = [&]() -> Result<CaptureResourceReconcileResult> {
-    std::vector<GlassDrawPlan> retainedDraws;
-    std::vector<std::uint64_t> retainedTokens;
-    std::set<std::uint64_t> uniqueTokens;
-    retainedDraws.reserve(captures.handoffs.size());
-    retainedTokens.reserve(captures.handoffs.size());
-    for (const auto &handoff : captures.handoffs) {
-      auto retained = std::ranges::find_if(
-          m_scene.draws, [&](const GlassDrawPlan &draw) {
-            return draw.key == handoff.fallback;
-          });
-      if (retained == m_scene.draws.end())
-        retained = std::ranges::find_if(
-            m_scene.draws, [&](const GlassDrawPlan &draw) {
-              return draw.key == handoff.successor;
-            });
-      if (retained == m_scene.draws.end())
-        return failure<CaptureResourceReconcileResult>(
-            ErrorCode::StaleGeneration, "handoff.fallback",
-            "previously drawn handoff presentation is unavailable");
-      auto fallback = *retained;
-      fallback.key = handoff.fallback;
-      retainedDraws.push_back(std::move(fallback));
-      if (uniqueTokens.insert(retained->resourceToken).second)
-        retainedTokens.push_back(retained->resourceToken);
-    }
-
     auto reconciled = m_execution->resources.reconcile(
-        captures.captures, maxTotalBytes, retainedTokens);
+        captures.captures, maxTotalBytes);
     if (!reconciled)
       return reconciled;
 
-    std::vector<CaptureResource> currentResources;
-    currentResources.reserve(reconciled.value().resources.size());
-    for (const auto &resource : reconciled.value().resources)
-      if (!uniqueTokens.contains(resource.token))
-        currentResources.push_back(resource);
-    auto scene = buildGlassRenderScene(captures, currentResources);
+    auto scene = buildGlassRenderScene(
+        captures, reconciled.value().resources);
     if (!scene)
       return Result<CaptureResourceReconcileResult>::failure(scene.error());
-
-    for (const auto &fallback : retainedDraws) {
-      const auto *resource =
-          m_execution->resources.resourceFor(fallback.resourceToken);
-      if (!resource || !resource->initialized())
-        return failure<CaptureResourceReconcileResult>(
-            ErrorCode::StaleGeneration, "handoff.fallback.resource",
-            "retained handoff capture is unavailable or uninitialized");
-      if (std::ranges::find_if(
-              scene.value().resources,
-              [&](const CaptureResource &candidate) {
-                return candidate.token == fallback.resourceToken;
-              }) == scene.value().resources.end())
-        scene.value().resources.push_back({
-            .token = fallback.resourceToken,
-            .plan = resource->plan(),
-        });
-      scene.value().draws.push_back(fallback);
-    }
     m_scene = std::move(scene.value());
     return reconciled;
   }();
@@ -501,16 +408,6 @@ HyprlandGlassPassCoordinator::enqueue(const RenderHookEvent &event) {
       return failure<GlassPassEnqueueResult>(
           ErrorCode::InternalError, "frame.draw_indices",
           "frame references a draw absent from the scene");
-  if (frame.value().fallbackDrawIndices.size() !=
-      frame.value().drawIndices.size())
-    return failure<GlassPassEnqueueResult>(
-        ErrorCode::InternalError, "frame.fallback_draw_indices",
-        "frame fallback selection does not match its draw selection");
-  for (const auto &index : frame.value().fallbackDrawIndices)
-    if (index && *index >= m_scene.draws.size())
-      return failure<GlassPassEnqueueResult>(
-          ErrorCode::InternalError, "frame.fallback_draw_indices",
-          "frame references a fallback draw absent from the scene");
 
   for (const auto &rect : frame.value().renderDamage)
     g_pHyprRenderer->m_renderData.damage.add(rect.x, rect.y, rect.width,
@@ -525,17 +422,10 @@ HyprlandGlassPassCoordinator::enqueue(const RenderHookEvent &event) {
         event.frameToken));
   const auto decorationOwned = event.hook == RenderHookStage::PreWindow;
   if (!decorationOwned)
-    for (std::size_t position = 0;
-         position < frame.value().drawIndices.size(); ++position) {
-      const auto index = frame.value().drawIndices[position];
-      const auto fallbackIndex = frame.value().fallbackDrawIndices[position];
+    for (const auto index : frame.value().drawIndices)
       g_pHyprRenderer->m_renderPass.add(makeUnique<V2GlassPass>(
           m_execution, m_scene.draws[index], event.output,
-          event.frameToken,
-          fallbackIndex
-              ? std::optional<GlassDrawPlan>{m_scene.draws[*fallbackIndex]}
-              : std::nullopt));
-    }
+          event.frameToken));
 
   return Result<GlassPassEnqueueResult>::success({
       .capturePasses = scheduled.value().size(),
