@@ -373,6 +373,18 @@ int main() {
             require(denied["ok"] == false, "wrong inspection token was accepted");
             require(denied["error"]["code"] == "invalid-token", "wrong inspection error code");
         }},
+        Case{"capabilities advertise continuous output liveness", [] {
+            Fixture fixture;
+            const auto result = call(
+                fixture.runtime,
+                R"({"version":2,"operation":"capabilities"})", 1);
+            require(result["ok"] == true, "capabilities request failed");
+            const auto& liveness =
+                result["result"]["output_liveness"];
+            require(liveness["rows"] == true &&
+                        liveness["continuous"] == true,
+                    "output liveness is not advertised");
+        }},
         Case{"status serves a liveness row for every renderer-known output", [] {
             Fixture fixture;
             fixture.runtime.setRendererStatus({

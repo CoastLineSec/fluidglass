@@ -324,6 +324,12 @@ Result<Target> validateTarget(TargetInput input) {
                 return Result<Target>::failure(std::move(*error));
             if (!input.stage)
                 return invalid("stage", "region target requires an explicit render stage");
+            // pre-window capture exists only for exact window targets; a
+            // region target accepted here would fail at capture time every
+            // frame with nothing reported against the target.
+            if (*input.stage == RenderStage::PreWindow)
+                return invalid(
+                    "stage", "region targets cannot use the pre-window stage");
             break;
         }
     }

@@ -319,6 +319,15 @@ int main() {
             require(result.error().path == "shape.parts[0].transition.protrusion",
                     "part protrusion failure path changed");
         }},
+        Case{"region rejects the pre-window stage", [] {
+            // pre-window capture requires an exact window target; accepting a
+            // region here would fail at capture time forever with no
+            // target-level failure to observe.
+            auto input = regionTarget();
+            input.stage = RenderStage::PreWindow;
+            require(!validateTarget(input),
+                    "region target accepted the pre-window stage");
+        }},
         Case{"region requires stage and geometry", [] {
             auto input = regionTarget();
             input.stage = std::nullopt;

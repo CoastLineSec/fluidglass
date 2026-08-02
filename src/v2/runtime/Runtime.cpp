@@ -308,6 +308,12 @@ json capabilitiesJson(const RendererRuntimeStatus& renderer) {
             {"maximum_duration_ms",
              Limits::MAX_VISIBILITY_TRANSITION_MS},
         }},
+        {"output_liveness", {
+            // status.outputs[]: one row per renderer-known output, held
+            // continuously — the client contract for the glass/neutral gate.
+            {"rows", true},
+            {"continuous", true},
+        }},
         {"target_readiness", {
             {"inactive_reporting", true},
             {"inactive_reasons", json::array({
