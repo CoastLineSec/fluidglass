@@ -31,6 +31,12 @@ Result<void> HyprlandDirectScanoutInhibitor::reconcile(
     std::span<const DirectScanoutLease> desired) {
   // lock(), never operator bool: the weak reference's boolean test does not
   // prove the monitor is still alive, only that the slot is engaged.
+  //
+  // Load-bearing ordering: this guard only permits reconciliation because
+  // Hyprland emits render.preChecks BEFORE assigning m_renderData.pMonitor
+  // for the frame. If a Hyprland release ever moves preChecks inside the
+  // frame, every reconcile fails here and glass tears down at refresh rate —
+  // loudly, which is the intended failure mode for that upstream change.
   if (g_pHyprRenderer && g_pHyprRenderer->m_renderData.pMonitor.lock())
     return failure(
         ErrorCode::UnsupportedOperation, "direct-scanout.render-frame",

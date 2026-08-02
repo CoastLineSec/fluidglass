@@ -128,6 +128,27 @@ int main() {
                     reconcile.find("Pointer::mgr"),
                 "cursor backend access occurs before active-frame rejection");
         }},
+        Case{"capture resources are reconciled at one boundary only", [] {
+            // m_passes.reconcile destroys and creates GL objects. Today that
+            // boundary is prepareRenderScene; anyone moving it must arrive
+            // here and decide the render-frame safety question deliberately.
+            const auto controller = source(
+                "src/v2/runtime/HyprlandGlassSceneController.cpp");
+            std::size_t count = 0;
+            for (std::size_t at = controller.find("m_passes.reconcile");
+                 at != std::string::npos;
+                 at = controller.find("m_passes.reconcile", at + 1))
+                ++count;
+            require(count == 1,
+                    "capture-resource reconciliation happens at more than one boundary");
+            const auto prepare = functionBody(
+                controller,
+                "HyprlandGlassSceneController::prepareRenderScene",
+                "HyprlandGlassSceneController::drawWindowDecoration");
+            require(prepare.find("m_passes.reconcile") !=
+                        std::string_view::npos,
+                    "resource reconciliation left prepareRenderScene");
+        }},
         Case{"readiness reconciliation reports the drawable-nothing partitions", [] {
             // The reporting logic lives in the extracted, unit-tested
             // reconcilePresentationReadiness; the controller must still route
