@@ -160,6 +160,24 @@ std::string layerReplacement(
         "}";
 }
 
+std::string dockReplacement(
+    std::string_view sessionId,
+    std::string_view token,
+    std::uint64_t generation) {
+    return std::string(R"({
+        "version":2,
+        "operation":"session.replace",
+        "session_id":")") + std::string(sessionId) +
+        R"(","token":")" + std::string(token) +
+        R"(","generation":)" + std::to_string(generation) +
+        R"(,"materials":{"glass":{}},"targets":[{
+            "id":"dock","kind":"layer",
+            "selector":{"namespace":"hgs:dock:DP-1"},
+            "material":{"source":"session","name":"glass"},
+            "shape":{"kind":"rounded-rect","radius":18}
+        }]})";
+}
+
 } // namespace
 
 int main() {
@@ -355,6 +373,99 @@ int main() {
             require(denied["ok"] == false, "wrong inspection token was accepted");
             require(denied["error"]["code"] == "invalid-token", "wrong inspection error code");
         }},
+        Case{"session.replace keeps readiness for targets the successor retains", [] {
+            Fixture fixture;
+            const auto opened = open(fixture.runtime);
+            const auto sessionId =
+                opened["result"]["session_id"].get<std::string>();
+            const auto token = opened["result"]["token"].get<std::string>();
+            require(call(fixture.runtime,
+                         layerReplacement(sessionId, token, 1), 10)["ok"] ==
+                        true,
+                    "initial layer replacement failed");
+            const auto snapshot = fixture.runtime.sessionManager().snapshot(
+                sessionId);
+            require(snapshot.has_value(), "session snapshot is unavailable");
+            const TargetIdentity identity{
+                .owner = snapshot->owner,
+                .targetId = "bar",
+            };
+            const PresentationKey key{
+                .identity = identity,
+                .output = "DP-1",
+                .outputGeneration = 9,
+                .stage = RenderStage::PostLayer,
+            };
+            auto& readiness = fixture.runtime.readinessTracker();
+            require(readiness.resolvePresentation(key).hasValue() &&
+                        readiness.transition(key, ReadinessState::Attached)
+                            .hasValue() &&
+                        readiness.transition(key,
+                                             ReadinessState::CaptureReady)
+                            .hasValue() &&
+                        readiness.transition(key, ReadinessState::Drawn)
+                            .hasValue(),
+                    "target did not reach drawn");
+
+            // A publish that keeps the target must not blink its liveness:
+            // the drawn presentation survives the generation swap untouched.
+            require(call(fixture.runtime,
+                         layerReplacement(sessionId, token, 2), 20)["ok"] ==
+                        true,
+                    "retaining replacement failed");
+            const auto retained = readiness.presentation(key);
+            require(retained.has_value() &&
+                        retained->state == ReadinessState::Drawn,
+                    "drawn presentation did not survive the replace");
+            const auto rows = outputGlassLiveness(readiness);
+            require(rows.size() == 1U && rows[0].output == "DP-1" &&
+                        rows[0].drawing,
+                    "liveness row blinked across the generation swap");
+        }},
+        Case{"session.replace erases readiness only for dropped targets", [] {
+            Fixture fixture;
+            const auto opened = open(fixture.runtime);
+            const auto sessionId =
+                opened["result"]["session_id"].get<std::string>();
+            const auto token = opened["result"]["token"].get<std::string>();
+            require(call(fixture.runtime,
+                         layerReplacement(sessionId, token, 1), 10)["ok"] ==
+                        true,
+                    "initial layer replacement failed");
+            const auto snapshot = fixture.runtime.sessionManager().snapshot(
+                sessionId);
+            require(snapshot.has_value(), "session snapshot is unavailable");
+            const TargetIdentity bar{
+                .owner = snapshot->owner,
+                .targetId = "bar",
+            };
+            const PresentationKey key{
+                .identity = bar,
+                .output = "DP-1",
+                .outputGeneration = 9,
+                .stage = RenderStage::PostLayer,
+            };
+            auto& readiness = fixture.runtime.readinessTracker();
+            require(readiness.resolvePresentation(key).hasValue(),
+                    "presentation did not resolve");
+
+            require(call(fixture.runtime,
+                         dockReplacement(sessionId, token, 2), 20)["ok"] ==
+                        true,
+                    "dropping replacement failed");
+            require(!readiness.target(bar).has_value(),
+                    "dropped target kept its readiness record");
+            require(readiness.presentations(bar).empty(),
+                    "dropped target kept a presentation record");
+            const TargetIdentity dock{
+                .owner = snapshot->owner,
+                .targetId = "dock",
+            };
+            const auto accepted = readiness.target(dock);
+            require(accepted.has_value() &&
+                        accepted->state == ReadinessState::Accepted,
+                    "replacement target was not accepted fresh");
+        }},
         Case{"handoff retention is separate from successor readiness", [] {
             Fixture fixture;
             const auto opened = open(fixture.runtime);
@@ -404,10 +515,14 @@ int main() {
                     sessionId + R"(","token":")" + token +
                     R"(","target_id":"bar"})",
                 21);
-            require(inspect["result"]["state"] == "accepted" &&
-                        inspect["result"]["presentations"].empty() &&
+            // Readiness now survives a replace for a retained target, so the
+            // successor inherits the drawn presentation; the handoff record is
+            // still reported separately rather than being folded into it.
+            require(inspect["result"]["presentations"].size() == 1U &&
+                        inspect["result"]["presentations"][0]["state"] ==
+                            "drawn" &&
                         inspect["result"]["handoff"]["state"] == "retained",
-                    "retained fallback was reported as successor readiness");
+                    "retained readiness and handoff state were conflated");
 
             fixture.runtime.handoffTracker().complete(key);
             const auto status = call(

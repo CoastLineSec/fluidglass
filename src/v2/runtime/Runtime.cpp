@@ -695,14 +695,27 @@ Result<json> dispatchRequest(
                     visibility.erase(record.identity);
             }
 
+            // Readiness survives a replace for every target the successor
+            // generation retains. Erasing them all would blink each output's
+            // liveness on every publish — the renderer never stopped drawing,
+            // so the signal must not claim it did. Only dropped targets are
+            // erased, and only new ones start from accepted.
+            std::set<std::string> successorIds;
+            for (const auto& target : replaced.value().targets)
+                successorIds.insert(target.id);
             if (previous)
                 for (const auto& target : previous->targets)
-                    readiness.erase({.owner = previous->owner, .targetId = target.id});
+                    if (!successorIds.contains(target.id))
+                        readiness.erase(
+                            {.owner = previous->owner, .targetId = target.id});
             for (const auto& target : replaced.value().targets) {
-                const auto accepted = readiness.accept({
+                const TargetIdentity identity{
                     .owner = replaced.value().owner,
                     .targetId = target.id,
-                });
+                };
+                if (readiness.target(identity))
+                    continue;
+                const auto accepted = readiness.accept(identity);
                 if (!accepted)
                     return Result<json>::failure(accepted.error());
             }
