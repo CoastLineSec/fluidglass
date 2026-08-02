@@ -44,9 +44,9 @@ ResolvedTarget target(
                 TargetSelector{RegionSelector{
                     .output = "DP-1",
                 }},
-        .geometry = kind == TargetKind::Region ?
-            std::optional<Rect>{geometry} :
-            std::nullopt,
+        .geometry = kind == TargetKind::Window ?
+            std::nullopt :
+            std::optional<Rect>{geometry},
         .stage = kind == TargetKind::Region ?
             std::optional<RenderStage>{stage} :
             std::nullopt,
@@ -162,6 +162,52 @@ int main() {
                 selectEffectiveTargets({}, leased, sessions);
             require(result.hasValue(), "layer subregion selection failed");
             require(result.value().targets.size() == 2U, "distinct layer subregions collided");
+        }},
+        Case{"derived layer targets on one surface collide by rule", [] {
+            auto first =
+                target({"client:first:s1", "glass"}, TargetKind::Layer, 2);
+            auto second =
+                target({"client:second:s2", "glass"}, TargetKind::Layer, 2);
+            first.definition.geometry = std::nullopt;
+            second.definition.geometry = std::nullopt;
+            // The collision must be the rule, not an accident of derived-rect
+            // equality: even a diverging rect value must still collide once
+            // the geometry is derived from the surface.
+            second.attachment.globalGeometry.x += 1.0;
+            const std::array leased{first, second};
+            const std::array sessions{
+                session("client:first:s1", SessionMode::Client),
+                session("client:second:s2", SessionMode::Client),
+            };
+            const auto result = selectEffectiveTargets({}, leased, sessions);
+            require(result.hasValue(), "derived collision failed globally");
+            require(result.value().targets.empty(),
+                    "derived same-surface targets selected a winner");
+            require(result.value().conflicts.size() == 2U,
+                    "derived collision was not reported for both owners");
+        }},
+        Case{"authority resolves derived targets on one surface", [] {
+            auto rule =
+                target({"config", "layer.bar.2"}, TargetKind::Layer, 2);
+            auto client =
+                target({"client:example:s1", "glass"}, TargetKind::Layer, 2);
+            rule.definition.geometry = std::nullopt;
+            client.definition.geometry = std::nullopt;
+            const std::array durable{rule};
+            const std::array leased{client};
+            const std::array sessions{
+                session("client:example:s1", SessionMode::Client),
+            };
+            const auto result =
+                selectEffectiveTargets(durable, leased, sessions);
+            require(result.hasValue(), "derived authority selection failed");
+            require(result.value().targets.size() == 1U &&
+                        result.value().targets.front().attachment.identity ==
+                            client.attachment.identity,
+                    "the session target did not win its surface");
+            require(result.value().suppressed ==
+                        std::vector{rule.attachment.identity},
+                    "the config rule was not suppressed");
         }},
         Case{"region stage participates in exact attachment identity", [] {
             const std::array leased{

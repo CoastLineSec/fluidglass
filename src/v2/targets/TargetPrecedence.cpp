@@ -103,6 +103,15 @@ Result<CollisionKey> collisionKey(
         key.output.clear();
         key.geometry = {};
     }
+    // A layer target without explicit geometry derives its rectangle from the
+    // surface, so two such targets on one surface always derive the same rect.
+    // Keying them on the rect would make the collision an accident of that
+    // equality; keying on the surface makes it the rule — one derived glass
+    // per surface and stage, resolved by authority. Explicit sub-region
+    // targets keep their rect so distinct subregions still coexist.
+    if (attachment.kind == TargetKind::Layer &&
+        !target.definition.geometry)
+        key.geometry = {};
     return Result<CollisionKey>::success(std::move(key));
 }
 
