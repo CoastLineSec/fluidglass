@@ -24,6 +24,20 @@ struct LayerSurfaceSnapshot {
     std::uint64_t objectToken = 0;
     std::string   output;
     Rect          globalGeometry;
+    /**
+     * The part of the surface the client actually presents, surface-local.
+     *
+     * Derived from the surface's committed input region. A shell whose layer
+     * surface is larger than its visible panel — headroom so the panel can
+     * slide without resizing — already describes the visible rectangle there,
+     * because that is what makes clicks land on the panel and not on the empty
+     * space beside it. It is committed atomically with the surface content, so
+     * it cannot disagree with what was drawn.
+     *
+     * Absent when the client set no input region, which means the whole
+     * surface.
+     */
+    std::optional<Rect> contentGeometry = std::nullopt;
     LayerLevel    level = LayerLevel::Top;
     double        opacity = 1.0;
     bool          mapped = false;

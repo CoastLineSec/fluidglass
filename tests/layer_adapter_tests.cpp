@@ -166,5 +166,82 @@ int main() {
             require(!result, "invalid layer opacity was accepted");
             require(result.error().path == "surface.opacity", "wrong malformed-layer path");
         }},
+
+        // Surface-derived geometry. A shell whose layer surface is larger than
+        // its visible panel already describes the visible rectangle as its
+        // input region, so the plugin can read it instead of being told.
+        Case{"a surface content rect narrows the attachment", [] {
+            auto snapshot = surface();
+            snapshot.contentGeometry = Rect{
+                .x = 12.0,
+                .y = 8.0,
+                .width = 400.0,
+                .height = 32.0,
+            };
+            const std::array surfaces{snapshot};
+            const auto result = resolveLayerAttachment(
+                identity(), target(), surfaces);
+            require(!!result, "content-derived geometry was rejected");
+            require(result.value().has_value(), "expected an attachment");
+            const auto box = result.value()->globalGeometry;
+            require(box.x == -1908.0 && box.y == 108.0,
+                    "content rect should offset from the surface origin");
+            require(box.width == 400.0 && box.height == 32.0,
+                    "content rect should size the attachment");
+            require(result.value()->containerGlobalGeometry->width == 1920.0,
+                    "the container stays the whole surface");
+        }},
+        Case{"an explicit target rect still wins over the content rect", [] {
+            // Backwards compatibility: a client that publishes geometry must
+            // behave exactly as it did before the surface reported anything.
+            auto snapshot = surface();
+            snapshot.contentGeometry = Rect{
+                .x = 12.0, .y = 8.0, .width = 400.0, .height = 32.0,
+            };
+            const std::array surfaces{snapshot};
+            const auto result = resolveLayerAttachment(
+                identity(),
+                target(Rect{.x = 0.0, .y = 0.0, .width = 100.0, .height = 20.0}),
+                surfaces);
+            require(!!result, "explicit geometry was rejected");
+            const auto box = result.value()->globalGeometry;
+            require(box.width == 100.0 && box.height == 20.0,
+                    "the target rect should win");
+        }},
+        Case{"no content rect means the whole surface", [] {
+            const std::array surfaces{surface()};
+            const auto result = resolveLayerAttachment(
+                identity(), target(), surfaces);
+            require(!!result, "resolution failed");
+            const auto box = result.value()->globalGeometry;
+            require(box.width == 1920.0 && box.height == 48.0,
+                    "absent content rect should leave the surface whole");
+        }},
+        Case{"a content rect is clipped to the surface", [] {
+            auto snapshot = surface();
+            snapshot.contentGeometry = Rect{
+                .x = -50.0, .y = -50.0, .width = 5000.0, .height = 5000.0,
+            };
+            const std::array surfaces{snapshot};
+            const auto result = resolveLayerAttachment(
+                identity(), target(), surfaces);
+            require(!!result, "resolution failed");
+            const auto box = result.value()->globalGeometry;
+            require(box.width == 1920.0 && box.height == 48.0,
+                    "an oversized content rect should clip to the surface");
+        }},
+        Case{"a content rect outside the surface draws nothing", [] {
+            // Resolves cleanly but contributes no presentation, which is the
+            // Inactive/EmptyGeometry case rather than a failure.
+            auto snapshot = surface();
+            snapshot.contentGeometry = Rect{
+                .x = 4000.0, .y = 0.0, .width = 100.0, .height = 20.0,
+            };
+            const std::array surfaces{snapshot};
+            const auto result = resolveLayerAttachment(
+                identity(), target(), surfaces);
+            require(!!result, "an offscreen content rect should not be an error");
+            require(!result.value().has_value(), "expected no attachment");
+        }},
     });
 }

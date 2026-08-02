@@ -39,6 +39,49 @@ std::string_view functionBody(
 
 int main() {
     return hfg::test::run({
+        // Layer geometry must be sampled from the LIVE animated value.
+        // CLayerSurface::m_geometry is the destination the layout produced;
+        // Hyprland's own renderer reads position/size(GEOMETRIC_CURRENT), and
+        // so must the catalog. Reading the destination would snap glass to the
+        // final position on the first frame of an open or move animation and
+        // leave it there while the surface slides — the single mistake this
+        // design is most likely to make.
+        Case{"the layer catalog samples animated geometry, not the destination", [] {
+            const auto catalog = source(
+                "src/v2/targets/HyprlandLayerCatalog.cpp");
+            const auto body = functionBody(
+                catalog,
+                "HyprlandLayerCatalog::allSnapshots",
+                "void HyprlandLayerCatalog::clear");
+
+            require(
+                body.find("GEOMETRIC_CURRENT") != std::string_view::npos,
+                "layer geometry is no longer sampled from the animated value");
+            require(
+                body.find("GEOMETRIC_GOAL") == std::string_view::npos,
+                "layer geometry must not be sampled from the destination");
+            require(
+                body.find("m_geometry") == std::string_view::npos,
+                "m_geometry is the layout destination, not the live box");
+        }},
+        Case{"the layer catalog derives its content rect from the input region", [] {
+            // effectiveInputRegion() already returns the whole surface when the
+            // client left the region infinite, and clips it otherwise. Reading
+            // m_current.input directly would mishandle the default.
+            const auto catalog = source(
+                "src/v2/targets/HyprlandLayerCatalog.cpp");
+            const auto body = functionBody(
+                catalog,
+                "std::optional<Rect> contentGeometryFor",
+                "Result<std::vector<LayerSurfaceSnapshot>> unavailable");
+
+            require(
+                body.find("effectiveInputRegion") != std::string_view::npos,
+                "the content rect no longer comes from the input region");
+            require(
+                body.find("m_current.input") == std::string_view::npos,
+                "the raw input region mishandles the infinite default");
+        }},
         Case{"scene reconciliation stays outside an active render frame", [] {
             const auto controller = source(
                 "src/v2/runtime/HyprlandGlassSceneController.cpp");

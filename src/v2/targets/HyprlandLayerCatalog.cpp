@@ -6,6 +6,7 @@
 #include <hyprland/src/desktop/view/LayerSurface.hpp>
 #include <hyprland/src/output/Monitor.hpp>
 #include <hyprland/src/protocols/LayerShell.hpp>
+#include <hyprland/src/protocols/core/Compositor.hpp>
 #include <hyprland/src/state/MonitorState.hpp>
 
 #include <algorithm>
@@ -16,6 +17,44 @@
 
 namespace hfg::v2 {
 namespace {
+
+/**
+ * The part of a layer surface the client presents, surface-local.
+ *
+ * `effectiveInputRegion()` already returns the whole surface rect when the
+ * client left the region infinite (the Wayland default) and clips it to the
+ * surface otherwise, so neither case needs special handling here. Nothing is
+ * reported when the region covers the whole surface, because that carries no
+ * information the surface box does not already give.
+ */
+std::optional<Rect> contentGeometryFor(const PHLLS& surface) {
+    const auto resource = surface->wlSurface();
+    if (!resource)
+        return std::nullopt;
+    const auto wl = resource->resource();
+    if (!wl)
+        return std::nullopt;
+
+    auto region = wl->m_current.effectiveInputRegion();
+    if (region.empty())
+        return std::nullopt;
+
+    const auto box = region.getExtents();
+    if (box.width <= 0 || box.height <= 0)
+        return std::nullopt;
+
+    const auto size = wl->m_current.size;
+    if (box.x <= 0 && box.y <= 0 &&
+        box.width >= size.x && box.height >= size.y)
+        return std::nullopt;
+
+    return Rect{
+        .x = static_cast<double>(box.x),
+        .y = static_cast<double>(box.y),
+        .width = static_cast<double>(box.width),
+        .height = static_cast<double>(box.height),
+    };
+}
 
 Result<std::vector<LayerSurfaceSnapshot>> unavailable(
     ErrorCode code,
@@ -113,6 +152,7 @@ HyprlandLayerCatalog::allSnapshots() {
                         .width = size.x,
                         .height = size.y,
                     },
+                    .contentGeometry = contentGeometryFor(surface),
                     .level = *mappedLevel,
                     .opacity = std::clamp(
                         static_cast<double>(surface->alpha().value()),

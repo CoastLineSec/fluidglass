@@ -142,16 +142,24 @@ Result<std::optional<ResolvedAttachment>> resolveLayerAttachment(
             "surface.level",
             "unsupported layer level");
 
+    // A target may declare which part of the surface it occupies, and a surface
+    // may report which part it actually presents. An explicit target rect wins,
+    // so a client that still publishes geometry behaves exactly as it did;
+    // otherwise the surface's own content rect is used, which is what lets a
+    // shell stop publishing geometry at all. Neither means the whole surface.
+    const auto subRect =
+        target.geometry ? target.geometry : surface.contentGeometry;
+
     Rect geometry = surface.globalGeometry;
-    if (target.geometry) {
-        const double left = std::max(0.0, target.geometry->x);
-        const double top = std::max(0.0, target.geometry->y);
+    if (subRect) {
+        const double left = std::max(0.0, subRect->x);
+        const double top = std::max(0.0, subRect->y);
         const double right = std::min(
             surface.globalGeometry.width,
-            target.geometry->x + target.geometry->width);
+            subRect->x + subRect->width);
         const double bottom = std::min(
             surface.globalGeometry.height,
-            target.geometry->y + target.geometry->height);
+            subRect->y + subRect->height);
         if (right <= left || bottom <= top)
             return Result<std::optional<ResolvedAttachment>>::success(
                 std::nullopt);
