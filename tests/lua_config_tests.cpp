@@ -38,6 +38,26 @@ LuaState evaluate(std::string_view source) {
 
 int main() {
     return hfg::test::run({
+        Case{"a rule without a material uses the default material", [] {
+            auto state = evaluate(R"(return {
+                version = 2,
+                enabled = true,
+                default_material = "fluid",
+                materials = {fluid = {}},
+                window_rules = {},
+                layer_rules = {
+                    {id = "bar", match = {namespace = {exact = "hgs:bar"}}},
+                },
+            })");
+            auto parsed = parseLuaConfig(state.get(), -1);
+            require(parsed.hasValue(), "rule without material failed to parse");
+            auto validated = validateConfig(std::move(parsed.value()));
+            require(validated.hasValue(),
+                    "rule without material did not validate");
+            require(validated.value().layerRules.size() == 1U &&
+                        validated.value().layerRules[0].material == "fluid",
+                    "default material was not applied to the rule");
+        }},
         Case{"minimal snapshot", [] {
             auto state = evaluate(R"(return {
                 version = 2,

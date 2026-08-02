@@ -17,6 +17,12 @@ buildTargetScene(
     std::span<const WindowSnapshot> windows,
     std::span<const LayerSurfaceSnapshot> layers,
     std::span<const OutputGeneration> outputs) {
+    // An explicit `enabled = false` in the Lua configuration is the user's
+    // master switch: it turns off session glass as well as config rules. No
+    // configuration at all leaves sessions working — absence is not refusal.
+    if (config && !config->enabled)
+        return Result<TargetScene>::success(TargetScene{});
+
     std::vector<ResolvedTarget> durable;
     if (config) {
         auto windowTargets =

@@ -118,6 +118,10 @@ Result<ConfigSnapshot> validateConfig(ConfigSnapshotInput input) {
             return invalid<ConfigSnapshot>(ErrorCode::InvalidRequest, base + ".id", "invalid rule id");
         if (!ruleIds.insert(source.id).second)
             return invalid<ConfigSnapshot>(ErrorCode::InvalidRequest, base + ".id", "rule ids must be unique");
+        // A rule without a material uses the configuration's default — the
+        // reason default_material exists.
+        if (source.material.empty())
+            source.material = result.defaultMaterial;
         if (!result.materials.contains(source.material))
             return invalid<ConfigSnapshot>(ErrorCode::InvalidMaterial, base + ".material", "material was not found");
         if (!source.initialClass && !source.currentClass && !source.initialTitle && !source.currentTitle)
@@ -160,6 +164,8 @@ Result<ConfigSnapshot> validateConfig(ConfigSnapshotInput input) {
             return invalid<ConfigSnapshot>(ErrorCode::InvalidRequest, base + ".id", "invalid rule id");
         if (!ruleIds.insert(source.id).second)
             return invalid<ConfigSnapshot>(ErrorCode::InvalidRequest, base + ".id", "rule ids must be unique");
+        if (source.material.empty())
+            source.material = result.defaultMaterial;
         if (!result.materials.contains(source.material))
             return invalid<ConfigSnapshot>(ErrorCode::InvalidMaterial, base + ".material", "material was not found");
         auto match = validateMatch(std::move(source.namespaceMatch), base + ".match.namespace");

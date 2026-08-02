@@ -130,6 +130,26 @@ SessionSnapshot clientOverride() {
 
 int main() {
     return hfg::test::run({
+        Case{"disabled configuration turns off session glass too", [] {
+            auto disabled = config();
+            disabled.enabled = false;
+            const std::array sessions{clientOverride()};
+            const std::array windows{window()};
+            const std::array layers{layer()};
+            const auto result = buildTargetScene(
+                &disabled,
+                sessions,
+                windows,
+                layers,
+                std::span<const OutputGeneration>{});
+            require(result.hasValue(), "disabled scene build failed");
+            // The same fixtures resolve two durable targets and one session
+            // override when enabled; the master switch must leave nothing.
+            require(result.value().effective.empty() &&
+                        result.value().failures.empty() &&
+                        result.value().suppressed.empty(),
+                    "enabled = false left glass running");
+        }},
         Case{"durable window and layer identities remain distinct", [] {
             const auto active = config();
             const std::array windows{window()};

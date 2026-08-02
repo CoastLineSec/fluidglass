@@ -338,9 +338,11 @@ Result<WindowRuleInput> parseWindowRule(lua_State* state, int index, std::string
         return Result<WindowRuleInput>::failure(std::move(*error));
 
     auto id = requiredString(state, index, "id", path + ".id");
-    auto material = requiredString(state, index, "material", path + ".material");
     if (!id) return Result<WindowRuleInput>::failure(id.error());
-    if (!material) return Result<WindowRuleInput>::failure(material.error());
+    std::string material;
+    if (auto error = optionalString(
+            state, index, "material", material, path + ".material"))
+        return Result<WindowRuleInput>::failure(std::move(*error));
 
     bool enabled = true;
     if (auto error = optionalBoolean(state, index, "enabled", enabled, path + ".enabled"))
@@ -373,7 +375,7 @@ Result<WindowRuleInput> parseWindowRule(lua_State* state, int index, std::string
         .currentClass = std::move(currentClass.value()),
         .initialTitle = std::move(initialTitle.value()),
         .currentTitle = std::move(currentTitle.value()),
-        .material = std::move(material.value()),
+        .material = std::move(material),
         .enabled = enabled,
     });
 }
@@ -387,9 +389,11 @@ Result<LayerRuleInput> parseLayerRule(lua_State* state, int index, std::string p
         return Result<LayerRuleInput>::failure(std::move(*error));
 
     auto id = requiredString(state, index, "id", path + ".id");
-    auto material = requiredString(state, index, "material", path + ".material");
     if (!id) return Result<LayerRuleInput>::failure(id.error());
-    if (!material) return Result<LayerRuleInput>::failure(material.error());
+    std::string material;
+    if (auto error = optionalString(
+            state, index, "material", material, path + ".material"))
+        return Result<LayerRuleInput>::failure(std::move(*error));
     bool enabled = true;
     if (auto error = optionalBoolean(state, index, "enabled", enabled, path + ".enabled"))
         return Result<LayerRuleInput>::failure(std::move(*error));
@@ -417,7 +421,7 @@ Result<LayerRuleInput> parseLayerRule(lua_State* state, int index, std::string p
     return Result<LayerRuleInput>::success({
         .id = std::move(id.value()),
         .namespaceMatch = std::move(namespaceMatch.value()),
-        .material = std::move(material.value()),
+        .material = std::move(material),
         .enabled = enabled,
     });
 }
