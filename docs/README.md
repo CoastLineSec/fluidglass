@@ -19,7 +19,6 @@ Shell and integration authors should use the versioned interface:
 - [Rendering and geometry](architecture/rendering-contract.md)
 - [Lua configuration](reference/lua-configuration.md)
 - [Runtime protocol](reference/runtime-protocol.md)
-- [Migrate from v1](guides/migration-v1-to-v2.md)
 
 Check `capabilities.rendering_ready` before expecting a v2 target to draw. A
 `false` value means the render path has not initialized successfully. Inspect

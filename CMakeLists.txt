@@ -57,7 +57,6 @@ set_target_properties(hyprfluidglass PROPERTIES
 install(TARGETS hyprfluidglass LIBRARY DESTINATION lib/hyprland)
 
 add_library(hyprfluidglass-v2-core STATIC
-    src/v2/compat/LegacyCompatibility.cpp
     src/v2/core/OpaqueId.cpp
     src/v2/ipc/Protocol.cpp
     src/v2/model/Config.cpp
@@ -158,7 +157,6 @@ if(BUILD_TESTING)
     endfunction()
 
     hfg_test(core SOURCES tests/core_tests.cpp INCLUDE_SRC)
-    hfg_test(legacy-compatibility SOURCES tests/legacy_compatibility_tests.cpp LINK hyprfluidglass-v2-core)
     hfg_test(direct-scanout-lease-plan SOURCES tests/direct_scanout_lease_plan_tests.cpp LINK hyprfluidglass-v2-core)
     hfg_test(hyprland-render-lifecycle-contract SOURCES tests/hyprland_render_lifecycle_contract_tests.cpp SOURCE_DIR)
     hfg_test(opaque-id SOURCES tests/opaque_id_tests.cpp LINK hyprfluidglass-v2-core)
