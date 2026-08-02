@@ -280,9 +280,11 @@ Result<void> HyprlandGlassSceneController::prepareRenderScene() {
                 captureFailure.error.message));
     for (const auto& drawFailure : reconciled.value().scene.drawFailures)
         if (readiness.presentation(drawFailure.key))
+            // Not a capture boundary: a draw-plan validation failure reported
+            // as capture-failed sends the investigation to the wrong stage.
             static_cast<void>(readiness.transition(
                 drawFailure.key,
-                readinessFailureState(drawFailure.error, true),
+                readinessFailureState(drawFailure.error),
                 drawFailure.error.message));
 
     m_renderingReady = true;

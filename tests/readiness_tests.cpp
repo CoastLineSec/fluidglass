@@ -25,6 +25,31 @@ PresentationKey presentation(std::string output = "DP-1", std::uint64_t generati
 
 int main() {
     return hfg::test::run({
+        Case{"a drawn presentation can fail out of drawn", [] {
+            ReadinessTracker tracker;
+            require(tracker.accept(identity()).hasValue(), "accept failed");
+            const auto key = presentation();
+            require(tracker.resolvePresentation(key).hasValue() &&
+                        tracker.transition(key, ReadinessState::Attached)
+                            .hasValue() &&
+                        tracker.transition(key, ReadinessState::CaptureReady)
+                            .hasValue() &&
+                        tracker.transition(key, ReadinessState::Drawn)
+                            .hasValue(),
+                    "march to drawn failed");
+            // A decoration that dies after its presentation drew must be able
+            // to take the record with it; a rejected transition would leave
+            // the record claiming drawn forever.
+            const auto failed = tracker.transition(
+                key, ReadinessState::Unresolved, "decoration detached");
+            require(failed.hasValue() &&
+                        failed.value().state == ReadinessState::Unresolved,
+                    "drawn presentation could not fail out of drawn");
+            const auto recovered = tracker.transition(
+                key, ReadinessState::Resolved, "");
+            require(recovered.hasValue(),
+                    "failed presentation could not re-resolve");
+        }},
         Case{"known outputs keep liveness rows without presentations", [] {
             ReadinessTracker tracker;
             const std::vector<KnownOutput> known{

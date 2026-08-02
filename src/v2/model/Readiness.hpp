@@ -114,6 +114,11 @@ struct PresentationKey {
     friend auto operator<=>(const PresentationKey&, const PresentationKey&) = default;
 };
 
+// Attached deliberately has no timeout. A presentation on an output that is
+// not rendering (DPMS, idle) stays attached-and-awaiting, and the per-output
+// liveness row reports exactly that: expected, not yet confirmed. A client
+// gates on the row, so nothing waits on this state — a timer here would turn
+// a sleeping monitor into a false failure.
 struct ReadinessRecord {
     ReadinessState state = ReadinessState::Accepted;
     std::uint64_t  sequence = 0;

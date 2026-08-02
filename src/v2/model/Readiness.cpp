@@ -130,12 +130,17 @@ bool ReadinessTracker::validPresentationTransition(ReadinessState from, Readines
                 to == ReadinessState::Unsupported || to == ReadinessState::CaptureFailed ||
                 to == ReadinessState::ShaderFailed || to == ReadinessState::ResourceLimited;
         case ReadinessState::CaptureReady:
+            // Unresolved/Unsupported are reachable here and from Drawn: a
+            // window decoration can fail after its presentation drew, and a
+            // rejected report would leave the record claiming drawn forever.
             return to == ReadinessState::Drawn || to == ReadinessState::CaptureFailed ||
-                to == ReadinessState::ShaderFailed || to == ReadinessState::ResourceLimited;
+                to == ReadinessState::ShaderFailed || to == ReadinessState::ResourceLimited ||
+                to == ReadinessState::Unresolved || to == ReadinessState::Unsupported;
         case ReadinessState::Drawn:
             return to == ReadinessState::Attached || to == ReadinessState::CaptureReady ||
                 to == ReadinessState::CaptureFailed || to == ReadinessState::ShaderFailed ||
-                to == ReadinessState::ResourceLimited;
+                to == ReadinessState::ResourceLimited ||
+                to == ReadinessState::Unresolved || to == ReadinessState::Unsupported;
         case ReadinessState::Unresolved:
         case ReadinessState::Unsupported:
         case ReadinessState::Detached:
