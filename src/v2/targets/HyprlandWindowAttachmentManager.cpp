@@ -1,6 +1,7 @@
 #include "v2/targets/HyprlandWindowAttachmentManager.hpp"
 
 #include <hyprland/src/desktop/view/Window.hpp>
+#include <hyprland/src/render/Renderer.hpp>
 
 #include <algorithm>
 #include <utility>
@@ -105,6 +106,7 @@ Result<void> HyprlandWindowAttachmentManager::reconcile(
         m_entries.push_back(std::move(entry));
     provisional.clear();
 
+    reconcileBlurSuppression();
     return Result<void>::success();
 }
 
@@ -121,6 +123,7 @@ Result<void> HyprlandWindowAttachmentManager::clear() {
             firstError = detached.error();
         ++entry;
     }
+    reconcileBlurSuppression();
     if (firstError)
         return Result<void>::failure(std::move(*firstError));
     return Result<void>::success();
@@ -174,12 +177,44 @@ void HyprlandWindowAttachmentManager::rollback(
             m_entries.push_back(std::move(entry));
     }
     provisional.clear();
+    reconcileBlurSuppression();
 }
 
 void HyprlandWindowAttachmentManager::pruneExpired() {
     std::erase_if(m_entries, [](const auto& entry) {
         return entry.window.expired();
     });
+}
+
+void HyprlandWindowAttachmentManager::reconcileBlurSuppression() {
+    const auto plan =
+        planWindowBlurSuppression(m_blurSuppressed, attached());
+
+    for (const auto token : plan.release) {
+        // A window that has already gone needs no release, and locking one
+        // mid-destruction is undefined. Dropping the token is the cleanup.
+        const auto window = m_catalog.windowFor(token);
+        if (window && window.value()) {
+            window.value()->m_ruleApplicator->noBlur().unset(
+                Desktop::Types::PRIORITY_SET_PROP);
+            if (g_pHyprRenderer)
+                g_pHyprRenderer->damageWindow(window.value());
+        }
+        std::erase(m_blurSuppressed, token);
+    }
+
+    for (const auto token : plan.claim) {
+        const auto window = m_catalog.windowFor(token);
+        if (!window || !window.value())
+            continue;
+        // Highest priority so a user rule cannot defeat it, and reversible so
+        // releasing restores whatever the user configured.
+        window.value()->m_ruleApplicator->noBlur().set(
+            true, Desktop::Types::PRIORITY_SET_PROP);
+        if (g_pHyprRenderer)
+            g_pHyprRenderer->damageWindow(window.value());
+        m_blurSuppressed.push_back(token);
+    }
 }
 
 } // namespace hfg::v2
