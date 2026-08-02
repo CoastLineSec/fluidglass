@@ -74,7 +74,8 @@ void reconcilePresentationReadiness(
     const PresentationScene& scene,
     std::span<const SessionSnapshot> sessions,
     const std::set<std::pair<PresentationKey, std::uint64_t>>&
-        previousMembership);
+        previousMembership,
+    std::span<const KnownOutput> knownOutputs = {});
 
 [[nodiscard]] Result<PresentationScene>
 buildPresentationScene(

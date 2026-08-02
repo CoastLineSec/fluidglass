@@ -476,9 +476,16 @@ void HyprlandGlassSceneController::reconcileReadiness(
     const std::set<std::pair<PresentationKey, std::uint64_t>>&
         previousMembership) {
     const auto sessions = m_runtime.sessionManager().snapshots();
+    std::vector<KnownOutput> known;
+    known.reserve(m_currentOutputs.size());
+    for (const auto& output : m_currentOutputs)
+        known.push_back({
+            .name = output.snapshot.name,
+            .generation = output.generation,
+        });
     reconcilePresentationReadiness(
         m_runtime.readinessTracker(), m_presentations, sessions,
-        previousMembership);
+        previousMembership, known);
 }
 
 void HyprlandGlassSceneController::recordFailure(Error error) noexcept {

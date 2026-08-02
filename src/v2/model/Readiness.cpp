@@ -107,6 +107,23 @@ void ReadinessTracker::erasePresentation(const PresentationKey& key) {
     m_presentations.erase(key);
 }
 
+Result<ReadinessRecord> ReadinessTracker::markPresentationInactive(
+    PresentationKey key,
+    std::string detail) {
+    if (m_targets.find(key.identity) == m_targets.end())
+        return failure("identity", "target has not been accepted");
+    if (key.output.empty())
+        return failure("output", "presentation output must not be empty");
+    const auto existing = m_presentations.find(key);
+    if (existing != m_presentations.end() &&
+        existing->second.state == ReadinessState::Inactive &&
+        existing->second.detail == detail)
+        return Result<ReadinessRecord>::success(existing->second);
+    auto record = nextRecord(ReadinessState::Inactive, std::move(detail));
+    m_presentations.insert_or_assign(std::move(key), record);
+    return Result<ReadinessRecord>::success(record);
+}
+
 ReadinessRecord ReadinessTracker::nextRecord(ReadinessState state, std::string detail) {
     return {
         .state = state,
@@ -230,7 +247,9 @@ std::vector<OutputGlassLiveness> outputGlassLiveness(
     std::vector<OutputGlassLiveness> result;
     result.reserve(byOutput.size());
     for (auto& [name, liveness] : byOutput) {
-        liveness.drawing = liveness.drawn > 0;
+        liveness.drawing = liveness.drawn > 0 ||
+            (liveness.inactive > 0 && liveness.awaiting == 0 &&
+             liveness.failed == 0);
         result.push_back(std::move(liveness));
     }
     return result;

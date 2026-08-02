@@ -99,6 +99,9 @@ enum class TargetInactiveReason {
 struct InactiveTarget {
     TargetIdentity       identity;
     TargetInactiveReason reason = TargetInactiveReason::Disabled;
+    /** The output that owns the attachment, when the resolver knows one. */
+    std::optional<std::string> output = std::nullopt;
+    RenderStage                stage = RenderStage::PostLayer;
 
     friend bool operator==(const InactiveTarget&, const InactiveTarget&) = default;
     friend auto operator<=>(const InactiveTarget&, const InactiveTarget&) = default;
@@ -154,7 +157,11 @@ struct OutputGlassLiveness {
     std::size_t   awaiting = 0;
     std::size_t   failed = 0;
     std::size_t   inactive = 0;
-    /** At least one presentation on this output is confirmed drawn. */
+    /**
+     * Glass on this output is accounted for: something is confirmed drawn,
+     * or everything present is deliberately undrawable (off-screen, disabled)
+     * with nothing pending and nothing failed.
+     */
     bool          drawing = false;
 
     friend bool operator==(const OutputGlassLiveness&, const OutputGlassLiveness&) = default;
@@ -181,6 +188,20 @@ class ReadinessTracker {
 
     void erase(const TargetIdentity& identity);
     void erasePresentation(const PresentationKey& key);
+
+    /**
+     * Records an inactive presentation on the output that owns the target.
+     *
+     * An off-screen target has no resolvable presentation, but its surface
+     * still belongs to one output — and that output's liveness must keep
+     * saying "glass is accounted for here" or a panel parked off-screen flips
+     * its row to not-drawing the moment it fully leaves the edge. Re-marking
+     * an unchanged fact is skipped so a parked panel does not churn the
+     * sequence every refresh.
+     */
+    Result<ReadinessRecord> markPresentationInactive(
+        PresentationKey key,
+        std::string detail);
 
     /** Every presentation the tracker holds, for aggregation. */
     [[nodiscard]] std::vector<std::pair<PresentationKey, ReadinessRecord>>

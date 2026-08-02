@@ -257,10 +257,11 @@ int main() {
                     "the failed output should not be drawing");
             require(liveness[1].failed == 1, "the failure should be counted");
         }},
-        Case{"an inactive presentation is neither drawing nor failing", [] {
-            // Resolved, and will never draw as published. Counting it as a
-            // failure would report a fault that does not exist; counting it as
-            // awaiting is what made this state invisible before.
+        Case{"inactive-only outputs count as accounted for", [] {
+            // Resolved, and will never draw as published — deliberately, not
+            // as a fault. A panel parked off-screen must keep its output's
+            // row true, or every hide/reveal excursion flips the client's
+            // gate; anything genuinely pending or failed still wins.
             ReadinessTracker readiness;
             static_cast<void>(readiness.accept(identity()));
             static_cast<void>(readiness.resolvePresentation(presentation()));
@@ -269,9 +270,24 @@ int main() {
 
             const auto liveness = outputGlassLiveness(readiness);
             require(liveness.size() == 1, "expected one output");
-            require(!liveness[0].drawing, "inactive is not drawing");
+            require(liveness[0].drawing,
+                    "inactive-only output is still accounted for");
             require(liveness[0].inactive == 1, "should be counted inactive");
             require(liveness[0].failed == 0, "inactive is not a failure");
+
+            // A second, pending presentation on the same output takes the
+            // row back to not-drawing: something expected is unconfirmed.
+            TargetIdentity pending{.owner = "client:1", .targetId = "other"};
+            static_cast<void>(readiness.accept(pending));
+            static_cast<void>(readiness.resolvePresentation({
+                .identity = pending,
+                .output = "DP-1",
+                .outputGeneration = 1,
+                .stage = RenderStage::PostLayer,
+            }));
+            const auto mixed = outputGlassLiveness(readiness);
+            require(mixed.size() == 1 && !mixed[0].drawing,
+                    "a pending presentation must take the row to not-drawing");
         }},
         Case{"an output with no presentations at all is not reported", [] {
             ReadinessTracker readiness;

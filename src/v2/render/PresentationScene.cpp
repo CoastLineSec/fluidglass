@@ -380,10 +380,14 @@ buildPresentationScene(
         }
         if (presentations.value().empty()) {
             // The target resolved and its geometry is valid — it simply lands
-            // on no current output. Nothing downstream will ever revisit it.
+            // on no current output. The attachment still names its owning
+            // output where one exists, so liveness can keep that row
+            // accounted for while the surface is parked off-screen.
             scene.inactive.push_back({
                 .identity = identity,
                 .reason = TargetInactiveReason::Offscreen,
+                .output = movingTarget.value().attachment.outputFilter,
+                .stage = movingTarget.value().attachment.stage,
             });
             continue;
         }
@@ -488,7 +492,8 @@ void reconcilePresentationReadiness(
     const PresentationScene& scene,
     std::span<const SessionSnapshot> sessions,
     const std::set<std::pair<PresentationKey, std::uint64_t>>&
-        previousMembership) {
+        previousMembership,
+    std::span<const KnownOutput> knownOutputs) {
     // Config-rule targets exist only in the resolved scene, so the scene is
     // where they enter readiness — and where they leave it.
     std::set<TargetIdentity> configSeen;
@@ -528,11 +533,33 @@ void reconcilePresentationReadiness(
         }
     }
 
+    // Off-screen targets keep a presentation-level record on their owning
+    // output so its liveness row stays accounted for; those keys must survive
+    // the stale-presentation sweep or they would churn every refresh.
+    std::set<PresentationKey> inactiveKeys;
+    const auto inactiveKeyFor =
+        [&](const InactiveTarget& inactive) -> std::optional<PresentationKey> {
+        if (!inactive.output)
+            return std::nullopt;
+        for (const auto& known : knownOutputs)
+            if (known.name == *inactive.output)
+                return PresentationKey{
+                    .identity = inactive.identity,
+                    .output = known.name,
+                    .outputGeneration = known.generation,
+                    .stage = inactive.stage,
+                };
+        return std::nullopt;
+    };
+    for (const auto& inactive : scene.inactive)
+        if (const auto key = inactiveKeyFor(inactive))
+            inactiveKeys.insert(*key);
+
     const auto erasePresentationsOutsideScene =
         [&](const TargetIdentity& identity) {
             for (const auto& [key, record] : readiness.presentations(identity)) {
                 static_cast<void>(record);
-                if (!currentKeys.contains(key))
+                if (!currentKeys.contains(key) && !inactiveKeys.contains(key))
                     readiness.erasePresentation(key);
             }
         };
@@ -569,8 +596,13 @@ void reconcilePresentationReadiness(
         static_cast<void>(readiness.failTarget(
             identity, ReadinessState::Inactive, std::move(detail)));
     };
-    for (const auto& inactive : scene.inactive)
+    for (const auto& inactive : scene.inactive) {
         reportInactive(inactive.identity, inactive.reason);
+        if (const auto key = inactiveKeyFor(inactive))
+            static_cast<void>(readiness.markPresentationInactive(
+                *key,
+                std::string(targetInactiveReasonDetail(inactive.reason))));
+    }
     for (const auto& suppressed : scene.suppressed)
         reportInactive(suppressed, TargetInactiveReason::Suppressed);
 

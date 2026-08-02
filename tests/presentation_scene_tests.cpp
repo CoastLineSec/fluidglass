@@ -128,6 +128,47 @@ PlannedPresentation plannedFor(
 
 int main() {
     return hfg::test::run({
+        Case{"an off-screen target keeps its owning output accounted for", [] {
+            ReadinessTracker readiness;
+            require(readiness
+                        .accept({.owner = "client:1", .targetId = "bar"})
+                        .hasValue(),
+                    "accept failed");
+            const std::array known{
+                KnownOutput{.name = "DP-1", .generation = 3},
+            };
+            PresentationScene scene{};
+            scene.inactive.push_back({
+                .identity = {.owner = "client:1", .targetId = "bar"},
+                .reason = TargetInactiveReason::Offscreen,
+                .output = "DP-1",
+                .stage = RenderStage::PostLayer,
+            });
+
+            // The session lists the target, so the stale-presentation sweep
+            // runs over it — the parked record must survive that sweep.
+            SessionSnapshot session{};
+            session.owner = "client:1";
+            Target bar{};
+            bar.id = "bar";
+            session.targets.push_back(bar);
+            const std::array sessions{session};
+
+            reconcilePresentationReadiness(
+                readiness, scene, sessions, {}, known);
+            auto rows = outputGlassLiveness(readiness, known);
+            require(rows.size() == 1U && rows[0].inactive == 1 &&
+                        rows[0].drawing,
+                    "parked target did not keep its output accounted for");
+
+            // Parked is steady state: a second reconcile must not churn the
+            // sequence or lose the record to the stale-presentation sweep.
+            const auto before = readiness.allPresentations();
+            reconcilePresentationReadiness(
+                readiness, scene, sessions, {}, known);
+            require(readiness.allPresentations() == before,
+                    "a parked target churned its records across refreshes");
+        }},
         Case{"config-rule targets enter and leave readiness with the scene", [] {
             ReadinessTracker readiness;
             PresentationScene scene{};
