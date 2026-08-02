@@ -29,7 +29,9 @@ HyprlandDirectScanoutInhibitor::~HyprlandDirectScanoutInhibitor() { clear(); }
 
 Result<void> HyprlandDirectScanoutInhibitor::reconcile(
     std::span<const DirectScanoutLease> desired) {
-  if (g_pHyprRenderer && g_pHyprRenderer->m_renderData.pMonitor)
+  // lock(), never operator bool: the weak reference's boolean test does not
+  // prove the monitor is still alive, only that the slot is engaged.
+  if (g_pHyprRenderer && g_pHyprRenderer->m_renderData.pMonitor.lock())
     return failure(
         ErrorCode::UnsupportedOperation, "direct-scanout.render-frame",
         "direct-scanout leases cannot change during an active render frame");

@@ -100,7 +100,7 @@ Result<std::unique_ptr<HyprlandStateGuard>> HyprlandStateGuard::capture(
     std::span<const std::uint32_t> textureUnits) {
     if (!g_pHyprRenderer || !Render::GL::g_pHyprOpenGL)
         return unavailable("renderer", "Hyprland OpenGL renderer is unavailable");
-    if (!g_pHyprRenderer->m_renderData.pMonitor)
+    if (!g_pHyprRenderer->m_renderData.pMonitor.lock())
         return unavailable("renderer.output", "current render output is unavailable");
     if (!g_pHyprRenderer->m_renderData.currentFB)
         return unavailable("renderer.framebuffer", "current framebuffer is unavailable");
