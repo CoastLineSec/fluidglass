@@ -161,4 +161,58 @@ bool ReadinessTracker::validTargetFailure(ReadinessState state) {
         state == ReadinessState::Inactive;
 }
 
+std::vector<std::pair<PresentationKey, ReadinessRecord>>
+ReadinessTracker::allPresentations() const {
+    return {m_presentations.begin(), m_presentations.end()};
+}
+
+std::vector<OutputGlassLiveness> outputGlassLiveness(
+    const ReadinessTracker& readiness) {
+    std::map<std::string, OutputGlassLiveness> byOutput;
+
+    for (const auto& [key, record] : readiness.allPresentations()) {
+        auto& liveness = byOutput[key.output];
+        liveness.output = key.output;
+        // The newest generation seen wins the label, so a client can tell an
+        // output has been rebuilt underneath it.
+        liveness.outputGeneration =
+            std::max(liveness.outputGeneration, key.outputGeneration);
+
+        switch (record.state) {
+            case ReadinessState::Drawn:
+                ++liveness.drawn;
+                break;
+            case ReadinessState::Inactive:
+                // Resolved, and will never draw as published. Not a failure,
+                // and not something to keep waiting on.
+                ++liveness.inactive;
+                break;
+            case ReadinessState::Invalid:
+            case ReadinessState::Unresolved:
+            case ReadinessState::Unsupported:
+            case ReadinessState::CaptureFailed:
+            case ReadinessState::ShaderFailed:
+            case ReadinessState::ResourceLimited:
+            case ReadinessState::Expired:
+            case ReadinessState::Detached:
+                ++liveness.failed;
+                break;
+            case ReadinessState::Accepted:
+            case ReadinessState::Resolved:
+            case ReadinessState::Attached:
+            case ReadinessState::CaptureReady:
+                ++liveness.awaiting;
+                break;
+        }
+    }
+
+    std::vector<OutputGlassLiveness> result;
+    result.reserve(byOutput.size());
+    for (auto& [name, liveness] : byOutput) {
+        liveness.drawing = liveness.drawn > 0;
+        result.push_back(std::move(liveness));
+    }
+    return result;
+}
+
 } // namespace hfg::v2

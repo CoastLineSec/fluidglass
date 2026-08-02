@@ -405,6 +405,21 @@ json statusJson(
     for (const auto& [state, count] : visibilityTotals)
         visibilityJson[std::string(state)] = count;
 
+    // One verdict per output: whether glass is drawing there. A client that
+    // derives no geometry needs nothing finer than this to choose between glass
+    // and its own neutral material.
+    json outputsJson = json::array();
+    for (const auto& liveness : outputGlassLiveness(readiness))
+        outputsJson.push_back({
+            {"name", liveness.output},
+            {"generation", liveness.outputGeneration},
+            {"drawing", liveness.drawing},
+            {"drawn", liveness.drawn},
+            {"awaiting", liveness.awaiting},
+            {"failed", liveness.failed},
+            {"inactive", liveness.inactive},
+        });
+
     const auto* active = config.active();
     json reloadError = nullptr;
     if (const auto& error = config.pendingError())
@@ -440,6 +455,7 @@ json statusJson(
             {"dynamic_targets", sessions.targetCount()},
         }},
         {"readiness", std::move(readinessJson)},
+        {"outputs", std::move(outputsJson)},
         {"presentation_handoffs", std::move(handoffJson)},
         {"presentation_morphs", std::move(morphJson)},
         {"visibility_transitions", std::move(visibilityJson)},

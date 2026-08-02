@@ -121,6 +121,31 @@ struct ReadinessRecord {
     friend bool operator==(const ReadinessRecord&, const ReadinessRecord&) = default;
 };
 
+/**
+ * Whether glass is drawing on one output.
+ *
+ * This is the whole of what a client needs in order to decide between glass and
+ * its own neutral material. Per-target readiness stays inside the plugin — the
+ * renderer needs it — but it stops being a client contract, because a client
+ * that derives nothing from geometry has nothing to reconcile it against.
+ *
+ * Per output rather than per target because that is where failure actually
+ * lives: backdrop capture resources are owned by an output generation, so a
+ * capture failure takes out every target on that output and nothing elsewhere.
+ */
+struct OutputGlassLiveness {
+    std::string   output;
+    std::uint64_t outputGeneration = 0;
+    std::size_t   drawn = 0;
+    std::size_t   awaiting = 0;
+    std::size_t   failed = 0;
+    std::size_t   inactive = 0;
+    /** At least one presentation on this output is confirmed drawn. */
+    bool          drawing = false;
+
+    friend bool operator==(const OutputGlassLiveness&, const OutputGlassLiveness&) = default;
+};
+
 class ReadinessTracker {
   public:
     [[nodiscard]] Result<ReadinessRecord> accept(TargetIdentity identity);
@@ -143,6 +168,10 @@ class ReadinessTracker {
     void erase(const TargetIdentity& identity);
     void erasePresentation(const PresentationKey& key);
 
+    /** Every presentation the tracker holds, for aggregation. */
+    [[nodiscard]] std::vector<std::pair<PresentationKey, ReadinessRecord>>
+    allPresentations() const;
+
   private:
     [[nodiscard]] ReadinessRecord nextRecord(ReadinessState state, std::string detail);
     [[nodiscard]] static bool validPresentationTransition(ReadinessState from, ReadinessState to);
@@ -152,5 +181,15 @@ class ReadinessTracker {
     std::map<PresentationKey, ReadinessRecord>  m_presentations;
     std::uint64_t                               m_sequence = 0;
 };
+
+/**
+ * Rolls per-presentation readiness up to one verdict per output.
+ *
+ * Outputs are reported in name order. An output with presentations but none
+ * drawn reports `drawing == false`, which is what keeps a client on its neutral
+ * material rather than going transparent over nothing.
+ */
+[[nodiscard]] std::vector<OutputGlassLiveness> outputGlassLiveness(
+    const ReadinessTracker& readiness);
 
 } // namespace hfg::v2

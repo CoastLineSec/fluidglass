@@ -143,5 +143,91 @@ int main() {
             require(tracker.transition(presentation(), ReadinessState::Attached).hasValue(),
                     "presentation could not attach after inactivity");
         }},
+
+        // Per-output liveness. This is what replaces per-target readiness as a
+        // client contract: a client that derives no geometry needs only to know
+        // whether glass is drawing on the output its surface sits on.
+        Case{"an output with a drawn presentation is drawing", [] {
+            ReadinessTracker readiness;
+            static_cast<void>(readiness.accept(identity()));
+            static_cast<void>(readiness.resolvePresentation(presentation()));
+            static_cast<void>(readiness.transition(presentation(), ReadinessState::Attached));
+            static_cast<void>(readiness.transition(presentation(), ReadinessState::CaptureReady));
+            static_cast<void>(readiness.transition(presentation(), ReadinessState::Drawn));
+
+            const auto liveness = outputGlassLiveness(readiness);
+            require(liveness.size() == 1, "expected one output");
+            require(liveness[0].output == "DP-1", "wrong output name");
+            require(liveness[0].drawing, "a drawn presentation means drawing");
+            require(liveness[0].drawn == 1, "wrong drawn count");
+        }},
+        Case{"an output that has resolved but not drawn is NOT drawing", [] {
+            // The safety property: a client must stay on its neutral material
+            // until glass is confirmed, or it goes transparent over nothing.
+            ReadinessTracker readiness;
+            static_cast<void>(readiness.accept(identity()));
+            static_cast<void>(readiness.resolvePresentation(presentation()));
+
+            const auto liveness = outputGlassLiveness(readiness);
+            require(liveness.size() == 1, "expected one output");
+            require(!liveness[0].drawing, "resolved is not drawn");
+            require(liveness[0].awaiting == 1, "should be awaiting");
+        }},
+        Case{"a capture failure on one output leaves the others drawing", [] {
+            // Capture resources are owned by an output generation, so this is
+            // exactly the failure boundary per-output liveness exists for.
+            ReadinessTracker readiness;
+            static_cast<void>(readiness.accept(identity()));
+            const auto good = presentation("DP-1");
+            const auto bad = presentation("DP-2");
+            static_cast<void>(readiness.resolvePresentation(good));
+            static_cast<void>(readiness.transition(good, ReadinessState::Attached));
+            static_cast<void>(readiness.transition(good, ReadinessState::CaptureReady));
+            static_cast<void>(readiness.transition(good, ReadinessState::Drawn));
+            static_cast<void>(readiness.resolvePresentation(bad));
+            static_cast<void>(readiness.transition(bad, ReadinessState::Attached));
+            static_cast<void>(readiness.transition(bad, ReadinessState::CaptureFailed));
+
+            const auto liveness = outputGlassLiveness(readiness);
+            require(liveness.size() == 2, "expected two outputs");
+            require(liveness[0].output == "DP-1" && liveness[0].drawing,
+                    "the healthy output should still be drawing");
+            require(liveness[1].output == "DP-2" && !liveness[1].drawing,
+                    "the failed output should not be drawing");
+            require(liveness[1].failed == 1, "the failure should be counted");
+        }},
+        Case{"an inactive presentation is neither drawing nor failing", [] {
+            // Resolved, and will never draw as published. Counting it as a
+            // failure would report a fault that does not exist; counting it as
+            // awaiting is what made this state invisible before.
+            ReadinessTracker readiness;
+            static_cast<void>(readiness.accept(identity()));
+            static_cast<void>(readiness.resolvePresentation(presentation()));
+            static_cast<void>(readiness.failTarget(
+                identity(), ReadinessState::Inactive, "target is disabled"));
+
+            const auto liveness = outputGlassLiveness(readiness);
+            require(liveness.size() == 1, "expected one output");
+            require(!liveness[0].drawing, "inactive is not drawing");
+            require(liveness[0].inactive == 1, "should be counted inactive");
+            require(liveness[0].failed == 0, "inactive is not a failure");
+        }},
+        Case{"an output with no presentations at all is not reported", [] {
+            ReadinessTracker readiness;
+            static_cast<void>(readiness.accept(identity()));
+            require(outputGlassLiveness(readiness).empty(),
+                    "a target with no presentations names no output");
+        }},
+        Case{"the newest output generation wins the label", [] {
+            ReadinessTracker readiness;
+            static_cast<void>(readiness.accept(identity()));
+            static_cast<void>(readiness.resolvePresentation(presentation("DP-1", 1)));
+            static_cast<void>(readiness.resolvePresentation(presentation("DP-1", 4)));
+
+            const auto liveness = outputGlassLiveness(readiness);
+            require(liveness.size() == 1, "same output, one entry");
+            require(liveness[0].outputGeneration == 4,
+                    "a rebuilt output should report its newest generation");
+        }},
     });
 }
