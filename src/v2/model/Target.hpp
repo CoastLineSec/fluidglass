@@ -10,6 +10,14 @@
 
 namespace hfg::v2 {
 
+/**
+ * Owner recorded on targets resolved from the Lua configuration. Config-rule
+ * glass never passes through a session, so this owner marks readiness records
+ * whose lifetime follows the resolved scene rather than a session generation.
+ */
+inline constexpr std::string_view CONFIG_TARGET_OWNER = "config";
+
+
 enum class TargetKind {
     Window,
     Layer,

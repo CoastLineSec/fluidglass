@@ -109,8 +109,74 @@ SessionSnapshot session() {
 
 } // namespace
 
+
+PlannedPresentation plannedFor(
+    std::string owner,
+    std::string targetId,
+    std::string outputName,
+    std::uint64_t attachmentToken = 7) {
+    PlannedPresentation planned{};
+    planned.presentation.key = PresentationKey{
+        .identity = {.owner = std::move(owner), .targetId = std::move(targetId)},
+        .output = std::move(outputName),
+        .outputGeneration = 1,
+        .stage = RenderStage::PostLayer,
+    };
+    planned.presentation.attachmentToken = attachmentToken;
+    return planned;
+}
+
 int main() {
     return hfg::test::run({
+        Case{"config-rule targets enter and leave readiness with the scene", [] {
+            ReadinessTracker readiness;
+            PresentationScene scene{};
+            scene.presentations.push_back(plannedFor(
+                std::string(CONFIG_TARGET_OWNER), "rule:bar", "DP-1"));
+
+            reconcilePresentationReadiness(readiness, scene, {}, {});
+            const TargetIdentity identity{
+                .owner = std::string(CONFIG_TARGET_OWNER),
+                .targetId = "rule:bar",
+            };
+            require(readiness.target(identity).has_value(),
+                    "config-rule target was not accepted from the scene");
+            const auto rows = outputGlassLiveness(readiness);
+            require(rows.size() == 1U && rows[0].awaiting == 1,
+                    "config-rule presentation is invisible to liveness");
+
+            // The rule stops matching: the record must leave with the scene
+            // rather than surviving as a phantom accepted target.
+            reconcilePresentationReadiness(readiness, PresentationScene{}, {}, {});
+            require(!readiness.target(identity).has_value(),
+                    "config-rule target outlived the scene");
+        }},
+        Case{"an unchanged inactive target stops bumping the sequence", [] {
+            ReadinessTracker readiness;
+            require(readiness
+                        .accept({.owner = "client:1", .targetId = "bar"})
+                        .hasValue(),
+                    "accept failed");
+            PresentationScene scene{};
+            scene.inactive.push_back({
+                .identity = {.owner = "client:1", .targetId = "bar"},
+                .reason = TargetInactiveReason::Offscreen,
+            });
+
+            reconcilePresentationReadiness(readiness, scene, {}, {});
+            const auto first = readiness.target(
+                {.owner = "client:1", .targetId = "bar"});
+            require(first.has_value() &&
+                        first->state == ReadinessState::Inactive,
+                    "inactive target was not reported");
+
+            reconcilePresentationReadiness(readiness, scene, {}, {});
+            const auto second = readiness.target(
+                {.owner = "client:1", .targetId = "bar"});
+            require(second.has_value() &&
+                        second->sequence == first->sequence,
+                    "an unchanged inactive report bumped the sequence");
+        }},
         Case{"target spanning outputs creates independent presentations", [] {
             const auto active = config();
             const std::array outputs{

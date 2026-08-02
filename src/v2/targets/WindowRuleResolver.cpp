@@ -117,7 +117,7 @@ resolveWindowRules(
             .enabled = true,
         };
         TargetIdentity identity{
-            .owner = "config",
+            .owner = std::string(CONFIG_TARGET_OWNER),
             .targetId = definition.id,
         };
         const std::array selected{window};

@@ -166,6 +166,14 @@ ReadinessTracker::allPresentations() const {
     return {m_presentations.begin(), m_presentations.end()};
 }
 
+std::vector<TargetIdentity> ReadinessTracker::targetIdentities() const {
+    std::vector<TargetIdentity> result;
+    result.reserve(m_targets.size());
+    for (const auto& [identity, record] : m_targets)
+        result.push_back(identity);
+    return result;
+}
+
 std::vector<OutputGlassLiveness> outputGlassLiveness(
     const ReadinessTracker& readiness,
     std::span<const KnownOutput> knownOutputs) {

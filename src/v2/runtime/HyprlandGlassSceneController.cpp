@@ -24,18 +24,6 @@ Result<void> failure(ErrorCode code, std::string path, std::string message) {
     });
 }
 
-ReadinessState readinessFailureState(const Error& error,
-                                     bool captureBoundary = false) {
-    if (error.code == ErrorCode::ResourceLimited)
-        return ReadinessState::ResourceLimited;
-    if (captureBoundary)
-        return ReadinessState::CaptureFailed;
-    if (error.code == ErrorCode::UnsupportedOperation ||
-        error.code == ErrorCode::UnsupportedTarget)
-        return ReadinessState::Unsupported;
-    return ReadinessState::Unresolved;
-}
-
 using PresentationMembership =
     std::set<std::pair<PresentationKey, std::uint64_t>>;
 
@@ -485,63 +473,10 @@ void HyprlandGlassSceneController::recordDecorationFailure(
 void HyprlandGlassSceneController::reconcileReadiness(
     const std::set<std::pair<PresentationKey, std::uint64_t>>&
         previousMembership) {
-    auto& readiness = m_runtime.readinessTracker();
-    std::set<PresentationKey> currentKeys;
-    for (const auto& planned : m_presentations.presentations) {
-        const auto& key = planned.presentation.key;
-        const auto targetRecord = readiness.target(key.identity);
-        if (!targetRecord)
-            continue;
-        if (targetRecord->state != ReadinessState::Accepted)
-            static_cast<void>(readiness.accept(key.identity));
-        currentKeys.insert(key);
-        const auto unchanged = previousMembership.contains(
-            {key, planned.presentation.attachmentToken});
-        if (!unchanged && readiness.presentation(key))
-            readiness.erasePresentation(key);
-        if (!readiness.presentation(key)) {
-            static_cast<void>(readiness.resolvePresentation(key));
-            static_cast<void>(
-                readiness.transition(key, ReadinessState::Attached));
-        }
-    }
-
-    for (const auto& session : m_runtime.sessionManager().snapshots())
-        for (const auto& target : session.targets) {
-            const TargetIdentity identity{
-                .owner = session.owner,
-                .targetId = target.id,
-            };
-            for (const auto& [key, record] :
-                 readiness.presentations(identity)) {
-                static_cast<void>(record);
-                if (!currentKeys.contains(key))
-                    readiness.erasePresentation(key);
-            }
-        }
-
-    for (const auto& failed : m_presentations.failures)
-        if (readiness.target(failed.identity))
-            static_cast<void>(readiness.failTarget(
-                failed.identity, readinessFailureState(failed.error),
-                failed.error.message));
-
-    // A target that resolves but contributes no presentation is neither
-    // planned above nor failed here, so nothing would ever move it off
-    // "accepted". Left unreported it is indistinguishable from a target still
-    // being resolved, and a client waiting on a drawn presentation waits
-    // forever with no failure and no timeout to observe.
-    const auto reportInactive = [&](const TargetIdentity& identity,
-                                    TargetInactiveReason reason) {
-        if (readiness.target(identity))
-            static_cast<void>(readiness.failTarget(
-                identity, ReadinessState::Inactive,
-                std::string(targetInactiveReasonDetail(reason))));
-    };
-    for (const auto& inactive : m_presentations.inactive)
-        reportInactive(inactive.identity, inactive.reason);
-    for (const auto& suppressed : m_presentations.suppressed)
-        reportInactive(suppressed, TargetInactiveReason::Suppressed);
+    const auto sessions = m_runtime.sessionManager().snapshots();
+    reconcilePresentationReadiness(
+        m_runtime.readinessTracker(), m_presentations, sessions,
+        previousMembership);
 }
 
 void HyprlandGlassSceneController::recordFailure(Error error) noexcept {

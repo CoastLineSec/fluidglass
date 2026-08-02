@@ -129,23 +129,29 @@ int main() {
                 "cursor backend access occurs before active-frame rejection");
         }},
         Case{"readiness reconciliation reports the drawable-nothing partitions", [] {
+            // The reporting logic lives in the extracted, unit-tested
+            // reconcilePresentationReadiness; the controller must still route
+            // every refresh through it.
             const auto controller = source(
                 "src/v2/runtime/HyprlandGlassSceneController.cpp");
             const auto reconcile = functionBody(
                 controller,
                 "HyprlandGlassSceneController::reconcileReadiness",
                 "HyprlandGlassSceneController::recordFailure");
-
             require(
-                reconcile.find("m_presentations.inactive") !=
+                reconcile.find("reconcilePresentationReadiness") !=
                     std::string_view::npos,
+                "controller does not route readiness through the reconciler");
+
+            const auto scene = source("src/v2/render/PresentationScene.cpp");
+            require(
+                scene.find("scene.inactive") != std::string_view::npos,
                 "inactive targets are never reported to readiness");
             require(
-                reconcile.find("m_presentations.suppressed") !=
-                    std::string_view::npos,
+                scene.find("scene.suppressed") != std::string_view::npos,
                 "suppressed targets are never reported to readiness");
             require(
-                reconcile.find("ReadinessState::Inactive") !=
+                scene.find("ReadinessState::Inactive") !=
                     std::string_view::npos,
                 "inactive targets are not given a distinct readiness state");
         }},

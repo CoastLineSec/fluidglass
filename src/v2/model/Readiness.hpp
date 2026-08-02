@@ -181,6 +181,9 @@ class ReadinessTracker {
     [[nodiscard]] std::vector<std::pair<PresentationKey, ReadinessRecord>>
     allPresentations() const;
 
+    /** Every accepted target identity, for scene-driven cleanup. */
+    [[nodiscard]] std::vector<TargetIdentity> targetIdentities() const;
+
   private:
     [[nodiscard]] ReadinessRecord nextRecord(ReadinessState state, std::string detail);
     [[nodiscard]] static bool validPresentationTransition(ReadinessState from, ReadinessState to);

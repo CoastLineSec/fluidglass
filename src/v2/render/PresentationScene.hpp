@@ -12,7 +12,11 @@
 #include "v2/targets/TargetResolver.hpp"
 #include "v2/targets/TargetScene.hpp"
 
+#include "v2/model/Readiness.hpp"
+
+#include <set>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace hfg::v2 {
@@ -50,6 +54,27 @@ struct PresentationScene {
         const PresentationScene&,
         const PresentationScene&) = default;
 };
+
+/**
+ * Folds a resolved presentation scene into the readiness tracker.
+ *
+ * Session targets are accepted by session.replace; config-rule targets never
+ * pass through a session, so they are accepted here on first sight and their
+ * records are dropped when the rule stops matching anything. Re-reporting an
+ * unchanged inactive target is skipped so a permanently inactive target does
+ * not bump the readiness sequence on every refresh.
+ */
+/** Maps a resolution or render error onto the readiness vocabulary. */
+[[nodiscard]] ReadinessState readinessFailureState(
+    const Error& error,
+    bool captureBoundary = false);
+
+void reconcilePresentationReadiness(
+    ReadinessTracker& readiness,
+    const PresentationScene& scene,
+    std::span<const SessionSnapshot> sessions,
+    const std::set<std::pair<PresentationKey, std::uint64_t>>&
+        previousMembership);
 
 [[nodiscard]] Result<PresentationScene>
 buildPresentationScene(

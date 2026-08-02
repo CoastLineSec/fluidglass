@@ -472,4 +472,112 @@ buildPresentationScene(
     return Result<PresentationScene>::success(std::move(scene));
 }
 
+ReadinessState readinessFailureState(const Error& error, bool captureBoundary) {
+    if (error.code == ErrorCode::ResourceLimited)
+        return ReadinessState::ResourceLimited;
+    if (captureBoundary)
+        return ReadinessState::CaptureFailed;
+    if (error.code == ErrorCode::UnsupportedOperation ||
+        error.code == ErrorCode::UnsupportedTarget)
+        return ReadinessState::Unsupported;
+    return ReadinessState::Unresolved;
+}
+
+void reconcilePresentationReadiness(
+    ReadinessTracker& readiness,
+    const PresentationScene& scene,
+    std::span<const SessionSnapshot> sessions,
+    const std::set<std::pair<PresentationKey, std::uint64_t>>&
+        previousMembership) {
+    // Config-rule targets exist only in the resolved scene, so the scene is
+    // where they enter readiness — and where they leave it.
+    std::set<TargetIdentity> configSeen;
+    const auto ensureConfigAccepted = [&](const TargetIdentity& identity) {
+        if (identity.owner != CONFIG_TARGET_OWNER)
+            return;
+        configSeen.insert(identity);
+        if (!readiness.target(identity))
+            static_cast<void>(readiness.accept(identity));
+    };
+    for (const auto& planned : scene.presentations)
+        ensureConfigAccepted(planned.presentation.key.identity);
+    for (const auto& failed : scene.failures)
+        ensureConfigAccepted(failed.identity);
+    for (const auto& inactive : scene.inactive)
+        ensureConfigAccepted(inactive.identity);
+    for (const auto& suppressed : scene.suppressed)
+        ensureConfigAccepted(suppressed);
+
+    std::set<PresentationKey> currentKeys;
+    for (const auto& planned : scene.presentations) {
+        const auto& key = planned.presentation.key;
+        const auto targetRecord = readiness.target(key.identity);
+        if (!targetRecord)
+            continue;
+        if (targetRecord->state != ReadinessState::Accepted)
+            static_cast<void>(readiness.accept(key.identity));
+        currentKeys.insert(key);
+        const auto unchanged = previousMembership.contains(
+            {key, planned.presentation.attachmentToken});
+        if (!unchanged && readiness.presentation(key))
+            readiness.erasePresentation(key);
+        if (!readiness.presentation(key)) {
+            static_cast<void>(readiness.resolvePresentation(key));
+            static_cast<void>(
+                readiness.transition(key, ReadinessState::Attached));
+        }
+    }
+
+    const auto erasePresentationsOutsideScene =
+        [&](const TargetIdentity& identity) {
+            for (const auto& [key, record] : readiness.presentations(identity)) {
+                static_cast<void>(record);
+                if (!currentKeys.contains(key))
+                    readiness.erasePresentation(key);
+            }
+        };
+    for (const auto& session : sessions)
+        for (const auto& target : session.targets)
+            erasePresentationsOutsideScene({
+                .owner = session.owner,
+                .targetId = target.id,
+            });
+
+    for (const auto& failed : scene.failures)
+        if (readiness.target(failed.identity))
+            static_cast<void>(readiness.failTarget(
+                failed.identity, readinessFailureState(failed.error),
+                failed.error.message));
+
+    // A target that resolves but contributes no presentation is neither
+    // planned above nor failed here, so nothing would ever move it off
+    // "accepted". Left unreported it is indistinguishable from a target still
+    // being resolved, and a client waiting on a drawn presentation waits
+    // forever with no failure and no timeout to observe.
+    const auto reportInactive = [&](const TargetIdentity& identity,
+                                    TargetInactiveReason reason) {
+        const auto record = readiness.target(identity);
+        if (!record)
+            return;
+        auto detail = std::string(targetInactiveReasonDetail(reason));
+        // Re-recording an unchanged fact would bump the sequence every
+        // refresh, turning a permanently inactive target into permanent
+        // churn for any client diffing on it.
+        if (record->state == ReadinessState::Inactive &&
+            record->detail == detail)
+            return;
+        static_cast<void>(readiness.failTarget(
+            identity, ReadinessState::Inactive, std::move(detail)));
+    };
+    for (const auto& inactive : scene.inactive)
+        reportInactive(inactive.identity, inactive.reason);
+    for (const auto& suppressed : scene.suppressed)
+        reportInactive(suppressed, TargetInactiveReason::Suppressed);
+
+    for (const auto& identity : readiness.targetIdentities())
+        if (identity.owner == CONFIG_TARGET_OWNER &&
+            !configSeen.contains(identity))
+            readiness.erase(identity);
+}
+
 } // namespace hfg::v2
