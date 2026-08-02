@@ -17,6 +17,6 @@ authors = ["CoastLineSec"]
 version = "0.1.0"
 description = "Live fluid-glass compositor material for Hyprland"
 build = [
-    "cmake -B build -S . -DCMAKE_BUILD_TYPE=Release",
-    "cmake --build build --parallel",
+    "cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF",
+    "cmake --build build --parallel --target hyprfluidglass",
 ]

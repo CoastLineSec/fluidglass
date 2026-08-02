@@ -16,19 +16,6 @@ pkg_check_modules(LUA REQUIRED IMPORTED_TARGET lua)
 # only build dependency is the Hyprland headers above — no system json package.
 set(HYPRFLUIDGLASS_JSON_INCLUDE "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
-# Build metadata baked into the binary for diagnostics.
-string(TIMESTAMP HYPRFLUIDGLASS_BUILD_TIME "%Y-%m-%dT%H:%M:%SZ" UTC)
-execute_process(
-    COMMAND git -C "${CMAKE_CURRENT_SOURCE_DIR}" rev-parse --short=12 HEAD
-    OUTPUT_VARIABLE HYPRFLUIDGLASS_GIT_COMMIT
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_QUIET
-)
-if(NOT HYPRFLUIDGLASS_GIT_COMMIT)
-    set(HYPRFLUIDGLASS_GIT_COMMIT "unknown")
-endif()
-set(HYPRFLUIDGLASS_BUILD_ID "${HYPRFLUIDGLASS_BUILD_TIME}-${HYPRFLUIDGLASS_GIT_COMMIT}")
-
 add_library(hyprfluidglass SHARED
     src/main.cpp
     src/v2/render/HyprlandCaptureExecutor.cpp
@@ -61,10 +48,6 @@ target_compile_options(hyprfluidglass PRIVATE
 )
 target_compile_definitions(hyprfluidglass PRIVATE
     HYPRFLUIDGLASS_PLUGIN_VERSION="${PROJECT_VERSION}"
-    HYPRFLUIDGLASS_BUILD_ID="${HYPRFLUIDGLASS_BUILD_ID}"
-    HYPRFLUIDGLASS_BUILD_TIME="${HYPRFLUIDGLASS_BUILD_TIME}"
-    HYPRFLUIDGLASS_GIT_COMMIT="${HYPRFLUIDGLASS_GIT_COMMIT}"
-    HYPRFLUIDGLASS_BUILD_TYPE="${CMAKE_BUILD_TYPE}"
 )
 set_target_properties(hyprfluidglass PROPERTIES
     PREFIX ""
