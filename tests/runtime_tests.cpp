@@ -373,6 +373,26 @@ int main() {
             require(denied["ok"] == false, "wrong inspection token was accepted");
             require(denied["error"]["code"] == "invalid-token", "wrong inspection error code");
         }},
+        Case{"status serves a liveness row for every renderer-known output", [] {
+            Fixture fixture;
+            fixture.runtime.setRendererStatus({
+                .renderingReady = true,
+                .renderer = "active",
+                .outputs = {{.name = "DP-1", .generation = 3}},
+            });
+            const auto status = call(
+                fixture.runtime,
+                R"({"version":2,"operation":"status"})", 5);
+            require(status["ok"] == true, "status request failed");
+            const auto& outputs = status["result"]["outputs"];
+            require(outputs.size() == 1U &&
+                        outputs[0]["name"] == "DP-1" &&
+                        outputs[0]["generation"] == 3 &&
+                        outputs[0]["drawing"] == false &&
+                        outputs[0]["drawn"] == 0 &&
+                        outputs[0]["awaiting"] == 0,
+                    "known output did not keep its liveness row");
+        }},
         Case{"session.replace keeps readiness for targets the successor retains", [] {
             Fixture fixture;
             const auto opened = open(fixture.runtime);

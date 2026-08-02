@@ -575,10 +575,18 @@ void HyprlandGlassSceneController::clearLiveState() noexcept {
 void HyprlandGlassSceneController::publishStatus() noexcept {
     try {
         const auto& scene = m_passes.scene();
+        std::vector<KnownOutput> outputs;
+        outputs.reserve(m_currentOutputs.size());
+        for (const auto& output : m_currentOutputs)
+            outputs.push_back({
+                .name = output.snapshot.name,
+                .generation = output.generation,
+            });
         m_runtime.setRendererStatus({
             .renderingReady = m_renderingReady,
             .renderer = m_renderingReady ? "active" :
                         (m_lastError ? "failed" : "inactive"),
+            .outputs = std::move(outputs),
             .presentations = m_presentations.presentations.size(),
             .captureResources = scene.resources.size(),
             .draws = scene.draws.size(),

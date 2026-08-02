@@ -167,8 +167,16 @@ ReadinessTracker::allPresentations() const {
 }
 
 std::vector<OutputGlassLiveness> outputGlassLiveness(
-    const ReadinessTracker& readiness) {
+    const ReadinessTracker& readiness,
+    std::span<const KnownOutput> knownOutputs) {
     std::map<std::string, OutputGlassLiveness> byOutput;
+
+    for (const auto& known : knownOutputs) {
+        auto& liveness = byOutput[known.name];
+        liveness.output = known.name;
+        liveness.outputGeneration =
+            std::max(liveness.outputGeneration, known.generation);
+    }
 
     for (const auto& [key, record] : readiness.allPresentations()) {
         auto& liveness = byOutput[key.output];

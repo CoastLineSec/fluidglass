@@ -409,7 +409,8 @@ json statusJson(
     // derives no geometry needs nothing finer than this to choose between glass
     // and its own neutral material.
     json outputsJson = json::array();
-    for (const auto& liveness : outputGlassLiveness(readiness))
+    for (const auto& liveness :
+         outputGlassLiveness(readiness, renderer.outputs))
         outputsJson.push_back({
             {"name", liveness.output},
             {"generation", liveness.outputGeneration},

@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <map>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -133,6 +134,14 @@ struct ReadinessRecord {
  * lives: backdrop capture resources are owned by an output generation, so a
  * capture failure takes out every target on that output and nothing elsewhere.
  */
+/** An output the renderer currently serves, whether or not glass is on it. */
+struct KnownOutput {
+    std::string   name;
+    std::uint64_t generation = 0;
+
+    friend bool operator==(const KnownOutput&, const KnownOutput&) = default;
+};
+
 struct OutputGlassLiveness {
     std::string   output;
     std::uint64_t outputGeneration = 0;
@@ -189,7 +198,17 @@ class ReadinessTracker {
  * drawn reports `drawing == false`, which is what keeps a client on its neutral
  * material rather than going transparent over nothing.
  */
+/**
+ * Rolls per-presentation readiness up to one verdict per output.
+ *
+ * Every known output gets a row, presentations or not: a client polling
+ * between a publish and its first resolution must see "this output exists and
+ * nothing is drawn there yet", never a vanished row it cannot distinguish from
+ * an unplugged monitor. An all-zero row means nothing is planned for that
+ * output; `awaiting > 0` means glass is expected and not yet confirmed.
+ */
 [[nodiscard]] std::vector<OutputGlassLiveness> outputGlassLiveness(
-    const ReadinessTracker& readiness);
+    const ReadinessTracker& readiness,
+    std::span<const KnownOutput> knownOutputs = {});
 
 } // namespace hfg::v2

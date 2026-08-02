@@ -16,6 +16,8 @@ namespace hfg::v2 {
 struct RendererRuntimeStatus {
     bool renderingReady = false;
     std::string renderer = "inactive";
+    /** Outputs the renderer currently serves; the basis for liveness rows. */
+    std::vector<KnownOutput> outputs;
     std::size_t presentations = 0;
     std::size_t captureResources = 0;
     std::size_t draws = 0;

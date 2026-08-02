@@ -25,6 +25,42 @@ PresentationKey presentation(std::string output = "DP-1", std::uint64_t generati
 
 int main() {
     return hfg::test::run({
+        Case{"known outputs keep liveness rows without presentations", [] {
+            ReadinessTracker tracker;
+            const std::vector<KnownOutput> known{
+                {.name = "DP-1", .generation = 4},
+                {.name = "DP-2", .generation = 7},
+            };
+            // Nothing planned anywhere: both rows still exist, all zero, so a
+            // client can tell "output present, no glass expected" apart from
+            // "output vanished".
+            auto rows = outputGlassLiveness(tracker, known);
+            require(rows.size() == 2U, "known outputs did not seed rows");
+            require(rows[0].output == "DP-1" && !rows[0].drawing &&
+                        rows[0].drawn == 0 && rows[0].awaiting == 0 &&
+                        rows[0].failed == 0 && rows[0].inactive == 0 &&
+                        rows[0].outputGeneration == 4,
+                    "empty known output row is wrong");
+
+            // A drawn presentation on one output must not disturb the other
+            // row, and an output the catalog has not reported yet still
+            // surfaces through its presentation.
+            require(tracker.accept(identity()).hasValue(), "accept failed");
+            const auto key = presentation("DP-2");
+            require(tracker.resolvePresentation(key).hasValue() &&
+                        tracker.transition(key, ReadinessState::Attached)
+                            .hasValue() &&
+                        tracker.transition(key, ReadinessState::CaptureReady)
+                            .hasValue() &&
+                        tracker.transition(key, ReadinessState::Drawn)
+                            .hasValue(),
+                    "presentation did not reach drawn");
+            rows = outputGlassLiveness(tracker, known);
+            require(rows.size() == 2U && rows[1].output == "DP-2" &&
+                        rows[1].drawing && rows[1].drawn == 1 &&
+                        !rows[0].drawing,
+                    "seeded rows did not aggregate presentations");
+        }},
         Case{"canonical readiness sequence", [] {
             ReadinessTracker tracker;
             require(tracker.accept(identity()).hasValue(), "target was not accepted");
