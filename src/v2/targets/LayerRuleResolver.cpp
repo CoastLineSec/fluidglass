@@ -9,11 +9,11 @@
 namespace hfg::v2 {
 namespace {
 
-Result<std::vector<ResolvedTarget>> invalid(
+Result<RuleResolution> invalid(
     ErrorCode code,
     std::string path,
     std::string message) {
-    return Result<std::vector<ResolvedTarget>>::failure({
+    return Result<RuleResolution>::failure({
         .code = code,
         .path = std::move(path),
         .message = std::move(message),
@@ -22,19 +22,19 @@ Result<std::vector<ResolvedTarget>> invalid(
 
 } // namespace
 
-Result<std::vector<ResolvedTarget>>
+Result<RuleResolution>
 resolveLayerRules(
     const ConfigSnapshot& config,
     std::span<const LayerSurfaceSnapshot> surfaces) {
     if (!config.enabled)
-        return Result<std::vector<ResolvedTarget>>::success({});
+        return Result<RuleResolution>::success({});
     if (surfaces.size() > Limits::MAX_COMPOSITOR_OBJECTS)
         return invalid(
             ErrorCode::ResourceLimited,
             "layers",
             "compositor layer count exceeds the supported limit");
 
-    std::vector<ResolvedTarget> result;
+    RuleResolution result;
     for (const auto& surface : surfaces) {
         if (!surface.mapped ||
             surface.fadingOut ||
@@ -47,11 +47,6 @@ resolveLayerRules(
             });
         if (rule == config.layerRules.end())
             continue;
-        if (!config.materials.contains(rule->material))
-            return invalid(
-                ErrorCode::InvalidMaterial,
-                "layer_rules." + rule->id + ".material",
-                "matched layer rule references a missing material");
 
         Target definition{
             .id = "layer." + rule->id + "." +
@@ -74,24 +69,41 @@ resolveLayerRules(
             .owner = std::string(CONFIG_TARGET_OWNER),
             .targetId = definition.id,
         };
+        if (!config.materials.contains(rule->material)) {
+            result.failures.push_back({
+                .identity = std::move(identity),
+                .error = {
+                    .code = ErrorCode::InvalidMaterial,
+                    .path = "layer_rules." + rule->id + ".material",
+                    .message =
+                        "matched layer rule references a missing material",
+                },
+            });
+            continue;
+        }
         const std::array selected{surface};
         auto attachment = resolveLayerAttachment(
             identity,
             definition,
             selected);
-        if (!attachment)
-            return Result<std::vector<ResolvedTarget>>::failure(
-                attachment.error());
+        if (!attachment) {
+            // A surface the adapter cannot place right now — mid-map, mid-
+            // resize — costs this target alone, never the scene.
+            result.failures.push_back({
+                .identity = std::move(identity),
+                .error = attachment.error(),
+            });
+            continue;
+        }
         if (!attachment.value())
             continue;
-        result.push_back({
+        result.resolved.push_back({
             .definition = std::move(definition),
             .attachment = std::move(*attachment.value()),
             .roundingPower = 2.0,
         });
     }
-    return Result<std::vector<ResolvedTarget>>::success(
-        std::move(result));
+    return Result<RuleResolution>::success(std::move(result));
 }
 
 } // namespace hfg::v2

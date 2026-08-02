@@ -11,11 +11,11 @@
 namespace hfg::v2 {
 namespace {
 
-Result<std::vector<ResolvedTarget>> invalid(
+Result<RuleResolution> invalid(
     ErrorCode code,
     std::string path,
     std::string message) {
-    return Result<std::vector<ResolvedTarget>>::failure({
+    return Result<RuleResolution>::failure({
         .code = code,
         .path = std::move(path),
         .message = std::move(message),
@@ -32,19 +32,19 @@ bool usableInitialClass(std::string_view value) {
 
 } // namespace
 
-Result<std::vector<ResolvedTarget>>
+Result<RuleResolution>
 resolveWindowRules(
     const ConfigSnapshot& config,
     std::span<const WindowSnapshot> windows) {
     if (!config.enabled)
-        return Result<std::vector<ResolvedTarget>>::success({});
+        return Result<RuleResolution>::success({});
     if (windows.size() > Limits::MAX_COMPOSITOR_OBJECTS)
         return invalid(
             ErrorCode::ResourceLimited,
             "windows",
             "compositor window count exceeds the supported limit");
 
-    std::vector<ResolvedTarget> result;
+    RuleResolution result;
     for (std::size_t index = 0; index < windows.size(); ++index) {
         const auto& window = windows[index];
         if (!window.mapped ||
@@ -64,30 +64,57 @@ resolveWindowRules(
             });
         if (rule == config.windowRules.end())
             continue;
-        if (!config.materials.contains(rule->material))
-            return invalid(
+        // Per-window problems cost this target alone: an XWayland window
+        // whose class has not arrived yet, or a momentarily odd rounding
+        // value, must not strip glass from every unrelated surface.
+        const auto fileFailure = [&](ErrorCode code,
+                                     std::string path,
+                                     std::string message) {
+            result.failures.push_back({
+                .identity = {
+                    .owner = std::string(CONFIG_TARGET_OWNER),
+                    .targetId = "window." + rule->id + "." +
+                        std::to_string(window.objectToken),
+                },
+                .error = {
+                    .code = code,
+                    .path = std::move(path),
+                    .message = std::move(message),
+                },
+            });
+        };
+        if (!config.materials.contains(rule->material)) {
+            fileFailure(
                 ErrorCode::InvalidMaterial,
                 "window_rules." + rule->id + ".material",
                 "matched window rule references a missing material");
+            continue;
+        }
         if (!std::isfinite(window.rounding) ||
-            window.rounding < 0.0)
-            return invalid(
+            window.rounding < 0.0) {
+            fileFailure(
                 ErrorCode::InvalidRequest,
                 "windows[" + std::to_string(index) + "].rounding",
                 "window rounding must be finite and non-negative");
+            continue;
+        }
         if (!std::isfinite(window.roundingPower) ||
             window.roundingPower <= 0.0 ||
-            window.roundingPower > 16.0)
-            return invalid(
+            window.roundingPower > 16.0) {
+            fileFailure(
                 ErrorCode::InvalidRequest,
                 "windows[" + std::to_string(index) + "].rounding_power",
                 "window rounding power must be finite and in (0, 16]");
+            continue;
+        }
         if (window.pid <= 0 &&
-            !usableInitialClass(window.initialClass))
-            return invalid(
+            !usableInitialClass(window.initialClass)) {
+            fileFailure(
                 ErrorCode::UnresolvedTarget,
                 "windows[" + std::to_string(index) + "].identity",
                 "matched window lacks stable pid or initial-class evidence");
+            continue;
+        }
 
         WindowSelector selector{
             .address = window.address,
@@ -125,19 +152,22 @@ resolveWindowRules(
             identity,
             definition,
             selected);
-        if (!attachment)
-            return Result<std::vector<ResolvedTarget>>::failure(
-                attachment.error());
+        if (!attachment) {
+            result.failures.push_back({
+                .identity = std::move(identity),
+                .error = attachment.error(),
+            });
+            continue;
+        }
         if (!attachment.value())
             continue;
-        result.push_back({
+        result.resolved.push_back({
             .definition = std::move(definition),
             .attachment = std::move(*attachment.value()),
             .roundingPower = window.roundingPower,
         });
     }
-    return Result<std::vector<ResolvedTarget>>::success(
-        std::move(result));
+    return Result<RuleResolution>::success(std::move(result));
 }
 
 } // namespace hfg::v2

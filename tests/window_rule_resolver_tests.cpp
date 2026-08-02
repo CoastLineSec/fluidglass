@@ -87,8 +87,8 @@ int main() {
             const auto result =
                 resolveWindowRules(config(), windows);
             require(result.hasValue(), "window rules did not resolve");
-            require(result.value().size() == 1U, "wrong resolved rule count");
-            const auto& target = result.value().front();
+            require(result.value().resolved.size() == 1U, "wrong resolved rule count");
+            const auto& target = result.value().resolved.front();
             require(target.attachment.identity.owner == "config", "wrong durable owner");
             require(target.attachment.identity.targetId == "window.files.91", "unstable durable target id");
             require(target.definition.material == MaterialReference{
@@ -107,9 +107,9 @@ int main() {
             const std::array windows{window(), second};
             const auto result =
                 resolveWindowRules(config(), windows);
-            require(result.hasValue() && result.value().size() == 2U, "multiple windows did not resolve");
-            require(result.value()[0].definition.id == "window.files.91", "first target id changed");
-            require(result.value()[1].definition.id == "window.files.92", "second target id changed");
+            require(result.hasValue() && result.value().resolved.size() == 2U, "multiple windows did not resolve");
+            require(result.value().resolved[0].definition.id == "window.files.91", "first target id changed");
+            require(result.value().resolved[1].definition.id == "window.files.92", "second target id changed");
         }},
         Case{"unmatched and unavailable windows are omitted", [] {
             auto unmatched = window();
@@ -118,7 +118,7 @@ int main() {
             const std::array unmatchedWindows{unmatched};
             const auto noMatch =
                 resolveWindowRules(config(), unmatchedWindows);
-            require(noMatch.hasValue() && noMatch.value().empty(), "unmatched window resolved");
+            require(noMatch.hasValue() && noMatch.value().resolved.empty(), "unmatched window resolved");
 
             for (int state = 0; state < 3; ++state) {
                 auto unavailable = window();
@@ -131,7 +131,7 @@ int main() {
                 const std::array unavailableWindows{unavailable};
                 const auto result =
                     resolveWindowRules(config(), unavailableWindows);
-                require(result.hasValue() && result.value().empty(), "unavailable window resolved");
+                require(result.hasValue() && result.value().resolved.empty(), "unavailable window resolved");
             }
         }},
         Case{"disabled durable config creates no targets", [] {
@@ -140,7 +140,7 @@ int main() {
             const std::array windows{window()};
             const auto result =
                 resolveWindowRules(disabled, windows);
-            require(result.hasValue() && result.value().empty(), "disabled config resolved");
+            require(result.hasValue() && result.value().resolved.empty(), "disabled config resolved");
         }},
         Case{"pid alone can guard a matched window", [] {
             auto pidOnly = window();
@@ -157,21 +157,25 @@ int main() {
             const std::array windows{pidOnly};
             const auto result =
                 resolveWindowRules(currentClassConfig, windows);
-            require(result.hasValue() && result.value().size() == 1U, "pid-only window did not resolve");
+            require(result.hasValue() && result.value().resolved.size() == 1U, "pid-only window did not resolve");
             const auto& selector =
-                std::get<WindowSelector>(result.value().front().definition.selector);
+                std::get<WindowSelector>(result.value().resolved.front().definition.selector);
             require(selector.pid == 7301, "pid guard was not retained");
             require(!selector.initialClass, "empty initial class became a guard");
         }},
-        Case{"matched malformed window fails closed", [] {
+        Case{"a malformed matched window costs its target alone", [] {
             auto malformed = window();
             malformed.rounding =
                 std::numeric_limits<double>::quiet_NaN();
             const std::array windows{malformed};
             const auto result =
                 resolveWindowRules(config(), windows);
-            require(!result, "malformed matched window resolved");
-            require(result.error().path == "windows[0].rounding", "wrong malformed-window path");
+            require(result.hasValue() &&
+                        result.value().resolved.empty() &&
+                        result.value().failures.size() == 1U &&
+                        result.value().failures[0].error.path ==
+                            "windows[0].rounding",
+                    "malformed rounding did not file a per-target failure");
 
             malformed = window();
             malformed.roundingPower =
@@ -179,10 +183,11 @@ int main() {
             const std::array invalidPower{malformed};
             const auto powerResult =
                 resolveWindowRules(config(), invalidPower);
-            require(!powerResult, "invalid rounding power resolved");
-            require(
-                powerResult.error().path == "windows[0].rounding_power",
-                "wrong rounding-power path");
+            require(powerResult.hasValue() &&
+                        powerResult.value().failures.size() == 1U &&
+                        powerResult.value().failures[0].error.path ==
+                            "windows[0].rounding_power",
+                    "invalid rounding power did not file a per-target failure");
         }},
     });
 }

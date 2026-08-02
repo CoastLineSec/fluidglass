@@ -24,6 +24,7 @@ buildTargetScene(
         return Result<TargetScene>::success(TargetScene{});
 
     std::vector<ResolvedTarget> durable;
+    std::vector<TargetResolutionFailure> durableFailures;
     if (config) {
         auto windowTargets =
             resolveWindowRules(*config, windows);
@@ -36,14 +37,20 @@ buildTargetScene(
             return Result<TargetScene>::failure(
                 layerTargets.error());
         durable.reserve(
-            windowTargets.value().size() +
-            layerTargets.value().size());
+            windowTargets.value().resolved.size() +
+            layerTargets.value().resolved.size());
         std::ranges::move(
-            windowTargets.value(),
+            windowTargets.value().resolved,
             std::back_inserter(durable));
         std::ranges::move(
-            layerTargets.value(),
+            layerTargets.value().resolved,
             std::back_inserter(durable));
+        std::ranges::move(
+            windowTargets.value().failures,
+            std::back_inserter(durableFailures));
+        std::ranges::move(
+            layerTargets.value().failures,
+            std::back_inserter(durableFailures));
     }
 
     auto leased = resolveSessionTargets(
@@ -71,6 +78,9 @@ buildTargetScene(
     };
     std::ranges::move(
         selected.value().conflicts,
+        std::back_inserter(scene.failures));
+    std::ranges::move(
+        durableFailures,
         std::back_inserter(scene.failures));
     return Result<TargetScene>::success(
         std::move(scene));

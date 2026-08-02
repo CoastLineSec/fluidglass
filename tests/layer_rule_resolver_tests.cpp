@@ -74,8 +74,8 @@ int main() {
             const std::array surfaces{layer()};
             const auto result =
                 resolveLayerRules(config(), surfaces);
-            require(result.hasValue() && result.value().size() == 1U, "layer rule did not resolve");
-            const auto& target = result.value().front();
+            require(result.hasValue() && result.value().resolved.size() == 1U, "layer rule did not resolve");
+            const auto& target = result.value().resolved.front();
             require(target.attachment.identity.owner == "config", "wrong durable owner");
             require(target.definition.id == "layer.shell-primary.51", "unstable durable target id");
             require(target.definition.material == MaterialReference{
@@ -92,9 +92,9 @@ int main() {
             };
             const auto result =
                 resolveLayerRules(config(), surfaces);
-            require(result.hasValue() && result.value().size() == 1U, "regex layer rule did not resolve");
-            require(result.value().front().definition.id == "layer.shell.52", "regex rule id changed");
-            require(result.value().front().definition.material.name == "clear", "regex material changed");
+            require(result.hasValue() && result.value().resolved.size() == 1U, "regex layer rule did not resolve");
+            require(result.value().resolved.front().definition.id == "layer.shell.52", "regex rule id changed");
+            require(result.value().resolved.front().definition.material.name == "clear", "regex material changed");
         }},
         Case{"unmatched and unavailable layers are omitted", [] {
             const std::array unrelated{
@@ -102,7 +102,7 @@ int main() {
             };
             const auto noMatch =
                 resolveLayerRules(config(), unrelated);
-            require(noMatch.hasValue() && noMatch.value().empty(), "unmatched layer resolved");
+            require(noMatch.hasValue() && noMatch.value().resolved.empty(), "unmatched layer resolved");
 
             for (int state = 0; state < 3; ++state) {
                 auto unavailable = layer();
@@ -115,7 +115,7 @@ int main() {
                 const std::array surfaces{unavailable};
                 const auto result =
                     resolveLayerRules(config(), surfaces);
-                require(result.hasValue() && result.value().empty(), "unavailable layer resolved");
+                require(result.hasValue() && result.value().resolved.empty(), "unavailable layer resolved");
             }
         }},
         Case{"disabled durable config creates no layer targets", [] {
@@ -124,16 +124,28 @@ int main() {
             const std::array surfaces{layer()};
             const auto result =
                 resolveLayerRules(disabled, surfaces);
-            require(result.hasValue() && result.value().empty(), "disabled layer config resolved");
+            require(result.hasValue() && result.value().resolved.empty(), "disabled layer config resolved");
         }},
-        Case{"malformed matched layer fails closed", [] {
+        Case{"a malformed matched layer costs its target alone", [] {
+            // One surface the adapter cannot place files a failure for that
+            // target; it must not fail the resolve and strip glass from
+            // every other surface.
             auto malformed = layer();
             malformed.opacity = 2.0;
-            const std::array surfaces{malformed};
+            auto healthy = layer();
+            healthy.namespaceName = "example:bar:secondary";
+            healthy.objectToken = healthy.objectToken + 1;
+            const std::array surfaces{malformed, healthy};
             const auto result =
                 resolveLayerRules(config(), surfaces);
-            require(!result, "malformed matched layer resolved");
-            require(result.error().path == "surface.opacity", "wrong malformed-layer path");
+            require(result.hasValue(),
+                    "a malformed surface failed the whole resolve");
+            require(result.value().resolved.size() == 1U,
+                    "the healthy surface was lost");
+            require(result.value().failures.size() == 1U &&
+                        result.value().failures[0].error.path ==
+                            "surface.opacity",
+                    "the malformed surface did not file a failure");
         }},
     });
 }

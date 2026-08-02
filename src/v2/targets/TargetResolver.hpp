@@ -19,6 +19,19 @@ struct TargetResolutionFailure {
     friend bool operator==(const TargetResolutionFailure&, const TargetResolutionFailure&) = default;
 };
 
+/**
+ * What a rule resolver produced: the targets that resolved, and the ones
+ * that could not. A per-surface problem — a window mid-teardown, a layer
+ * momentarily unsized — files a failure for that target alone; it must never
+ * take down the rest of the scene.
+ */
+struct RuleResolution {
+    std::vector<ResolvedTarget>          resolved;
+    std::vector<TargetResolutionFailure> failures;
+
+    friend bool operator==(const RuleResolution&, const RuleResolution&) = default;
+};
+
 struct TargetResolutionBatch {
     std::vector<ResolvedTarget>          resolved;
     std::vector<InactiveTarget>          inactive;

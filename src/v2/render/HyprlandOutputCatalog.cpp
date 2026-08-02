@@ -232,8 +232,11 @@ Result<OutputCatalogRefresh> HyprlandOutputCatalog::refresh() {
             continue;
         auto snapshot = snapshotFor(monitor);
         if (!snapshot)
-            return Result<OutputCatalogRefresh>::failure(
-                snapshot.error());
+            // A monitor mid-modeset, mid-hotplug or DPMS-transitioning can
+            // fail its snapshot transiently. It is simply not a current
+            // output this refresh — failing the whole catalog here used to
+            // tear down every output's glass for one monitor's flux.
+            continue;
         if (!seenNames.insert(snapshot.value().name).second)
             return failure<OutputCatalogRefresh>(
                 ErrorCode::InternalError,
