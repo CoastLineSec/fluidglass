@@ -344,6 +344,7 @@ HyprlandGlassPassCoordinator::reconcile(const CaptureScene &captures,
     if (!scene)
       return Result<CaptureResourceReconcileResult>::failure(scene.error());
     m_scene = std::move(scene.value());
+    m_framePlanMemo.reset();
     return reconciled;
   }();
   if (!resources)
@@ -377,6 +378,13 @@ HyprlandGlassPassCoordinator::enqueue(const RenderHookEvent &event) {
   if (!damage)
     return Result<GlassPassEnqueueResult>::failure(damage.error());
   auto frame = planGlassFrame(m_scene, event, damage.value());
+  if (frame && event.hook == RenderHookStage::PreWindow)
+    m_framePlanMemo = FramePlanMemo{
+        .frameToken = event.frameToken,
+        .output = event.output.snapshot.name,
+        .damage = damage.value(),
+        .plan = frame.value(),
+    };
   if (!frame)
     return Result<GlassPassEnqueueResult>::failure(frame.error());
 
@@ -453,11 +461,22 @@ HyprlandGlassPassCoordinator::enqueueWindowDecoration(
         ErrorCode::InvalidRequest, "opacity",
         "window decoration opacity must be finite from 0 through 1");
 
-  auto damage = currentFrameDamage(event.output.snapshot);
-  if (!damage)
-    return Result<GlassPassEnqueueResult>::failure(damage.error());
-  auto selected = planWindowDecorationDraws(m_scene, event, identity,
-                                            objectToken, damage.value());
+  const auto memoized =
+      m_framePlanMemo &&
+      m_framePlanMemo->frameToken == event.frameToken &&
+      m_framePlanMemo->output == event.output.snapshot.name;
+  std::vector<PixelRect> computedDamage;
+  if (!memoized) {
+    auto damage = currentFrameDamage(event.output.snapshot);
+    if (!damage)
+      return Result<GlassPassEnqueueResult>::failure(damage.error());
+    computedDamage = std::move(damage.value());
+  }
+  const auto &frameDamage =
+      memoized ? m_framePlanMemo->damage : computedDamage;
+  auto selected = planWindowDecorationDraws(
+      m_scene, event, identity, objectToken, frameDamage,
+      memoized ? &m_framePlanMemo->plan : nullptr);
   if (!selected)
     return Result<GlassPassEnqueueResult>::failure(selected.error());
 
@@ -489,6 +508,7 @@ void HyprlandGlassPassCoordinator::setObserver(
 
 void HyprlandGlassPassCoordinator::clear() noexcept {
   m_scene = {};
+  m_framePlanMemo.reset();
   if (!m_execution)
     return;
   m_execution->scheduler.clear();

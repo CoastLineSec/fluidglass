@@ -152,7 +152,8 @@ Result<GlassFramePlan> planGlassFrame(const GlassRenderScene &scene,
 Result<std::vector<std::size_t>> planWindowDecorationDraws(
     const GlassRenderScene &scene, const RenderHookEvent &event,
     const TargetIdentity &identity, std::uint64_t objectToken,
-    std::span<const PixelRect> frameDamage) {
+    std::span<const PixelRect> frameDamage,
+    const GlassFramePlan *precomputed) {
   if (identity.owner.empty() || identity.targetId.empty())
     return Result<std::vector<std::size_t>>::failure({
         .code = ErrorCode::InvalidRequest,
@@ -168,12 +169,19 @@ Result<std::vector<std::size_t>> planWindowDecorationDraws(
             "window decoration must match an exact pre-window render event",
     });
 
-  auto frame = planGlassFrame(scene, event, frameDamage);
-  if (!frame)
-    return Result<std::vector<std::size_t>>::failure(frame.error());
+  // The plain enqueue path plans the same frame at pre-window; a caller
+  // that already holds that plan passes it in instead of planning twice.
+  Result<GlassFramePlan> computed = Result<GlassFramePlan>::success({});
+  if (!precomputed) {
+    computed = planGlassFrame(scene, event, frameDamage);
+    if (!computed)
+      return Result<std::vector<std::size_t>>::failure(computed.error());
+  }
+  const GlassFramePlan &frame =
+      precomputed ? *precomputed : computed.value();
 
   std::vector<std::size_t> selected;
-  for (const auto index : frame.value().drawIndices) {
+  for (const auto index : frame.drawIndices) {
     if (index >= scene.draws.size())
       return Result<std::vector<std::size_t>>::failure({
           .code = ErrorCode::InternalError,

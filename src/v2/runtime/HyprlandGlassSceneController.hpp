@@ -85,6 +85,9 @@ class HyprlandGlassSceneController final
     std::vector<OutputGeneration> m_currentOutputs;
     TargetScene m_targets;
     PresentationScene m_presentations;
+    // The previous scene's membership, kept so each refresh builds one
+    // membership set instead of rebuilding the old scene's as well.
+    std::set<std::pair<PresentationKey, std::uint64_t>> m_membership;
     std::map<std::string, RenderHookEvent, std::less<>> m_pendingWindows;
     std::map<std::uint64_t, std::vector<PresentationKey>> m_capturePresentations;
     std::optional<Error> m_lastError;

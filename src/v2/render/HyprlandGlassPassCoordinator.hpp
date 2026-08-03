@@ -2,6 +2,7 @@
 
 #include "v2/core/Result.hpp"
 #include "v2/render/CaptureScene.hpp"
+#include "v2/render/GlassFramePlan.hpp"
 #include "v2/render/GlassRenderScene.hpp"
 #include "v2/render/HyprlandCaptureResourceManager.hpp"
 #include "v2/render/RenderStageScheduler.hpp"
@@ -72,6 +73,15 @@ public:
 private:
   std::shared_ptr<HyprlandGlassPassExecutionState> m_execution;
   GlassRenderScene m_scene;
+  // One-slot memo: at pre-window the decoration path replans the exact frame
+  // the plain enqueue just planned, so the plan is kept for that frame.
+  struct FramePlanMemo {
+    std::uint64_t frameToken = 0;
+    std::string output;
+    std::vector<PixelRect> damage;
+    GlassFramePlan plan;
+  };
+  std::optional<FramePlanMemo> m_framePlanMemo;
 };
 
 } // namespace hfg::v2

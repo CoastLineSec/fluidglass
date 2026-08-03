@@ -30,6 +30,7 @@ planGlassFrame(const GlassRenderScene &scene, const RenderHookEvent &event,
 [[nodiscard]] Result<std::vector<std::size_t>> planWindowDecorationDraws(
     const GlassRenderScene &scene, const RenderHookEvent &event,
     const TargetIdentity &identity, std::uint64_t objectToken,
-    std::span<const PixelRect> frameDamage);
+    std::span<const PixelRect> frameDamage,
+    const GlassFramePlan *precomputed = nullptr);
 
 } // namespace hfg::v2

@@ -190,13 +190,13 @@ Result<void> HyprlandGlassSceneController::refreshResolvedScene(
     }
 
 
-    const auto previousMembership = membershipOf(m_presentations);
-    const auto membershipChanged =
-        previousMembership != membershipOf(presentations.value());
+    auto nextMembership = membershipOf(presentations.value());
+    const auto membershipChanged = m_membership != nextMembership;
     m_currentOutputs = std::move(outputs.value().current);
     m_targets = std::move(targets.value());
     m_presentations = std::move(presentations.value());
-    reconcileReadiness(previousMembership);
+    reconcileReadiness(m_membership);
+    m_membership = std::move(nextMembership);
     if (membershipChanged && g_pHyprRenderer && g_pCompositor)
         for (const auto& monitor : State::monitorState()->monitors())
             if (monitor)
@@ -367,6 +367,7 @@ void HyprlandGlassSceneController::clearLiveState() noexcept {
         static_cast<void>(m_attachments->clear());
     m_pendingWindows.clear();
     m_capturePresentations.clear();
+    m_membership.clear();
 }
 
 void HyprlandGlassSceneController::publishStatus() noexcept {

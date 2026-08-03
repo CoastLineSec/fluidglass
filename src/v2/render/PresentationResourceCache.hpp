@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <map>
+#include <set>
 #include <memory>
 #include <vector>
 
@@ -22,8 +23,9 @@ public:
   }
 
   void retain(const std::vector<PresentationKey> &keys) {
-    std::erase_if(m_resources, [&keys](const auto &entry) {
-      return std::ranges::find(keys, entry.first) == keys.end();
+    const std::set<PresentationKey> keep(keys.begin(), keys.end());
+    std::erase_if(m_resources, [&keep](const auto &entry) {
+      return !keep.contains(entry.first);
     });
   }
 
