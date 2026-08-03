@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <string_view>
 #include <vector>
 
 namespace hfg::v2 {
@@ -68,6 +69,8 @@ public:
   [[nodiscard]] const GlassRenderScene &scene() const noexcept;
 
   void setObserver(std::weak_ptr<GlassPassObserver> observer) noexcept;
+  /** Drops per-output frame state for an output that no longer exists. */
+  void forgetOutput(std::string_view output) noexcept;
   void clear() noexcept;
 
 private:

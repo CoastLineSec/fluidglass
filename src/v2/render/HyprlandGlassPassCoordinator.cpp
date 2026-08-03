@@ -506,6 +506,15 @@ void HyprlandGlassPassCoordinator::setObserver(
     m_execution->observer = std::move(observer);
 }
 
+void HyprlandGlassPassCoordinator::forgetOutput(
+    std::string_view output) noexcept {
+  try {
+    if (m_execution)
+      m_execution->scheduler.clearOutput(output);
+  } catch (...) {
+  }
+}
+
 void HyprlandGlassPassCoordinator::clear() noexcept {
   m_scene = {};
   m_framePlanMemo.reset();

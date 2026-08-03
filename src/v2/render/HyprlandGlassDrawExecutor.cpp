@@ -1,3 +1,4 @@
+#include <algorithm>
 #include "v2/render/HyprlandGlassDrawExecutor.hpp"
 
 #include "v2/core/Limits.hpp"
@@ -65,32 +66,35 @@ void uploadUniforms(const GlassShaderUniforms &locations,
   uploadVec4(locations.cutoutRect, values.cutoutRect);
   uploadVec4(locations.cutoutRadii, values.cutoutRadii);
 
+  // The shader never reads a slot at or past the counts, so only the used
+  // prefix crosses to the GPU — a plain rounded rect uploads zero of the
+  // ~700 floats the full 32-slot arrays would cost per draw.
+  const auto partSlots = static_cast<GLsizei>(std::clamp(
+      values.partCount, 0,
+      static_cast<int>(Limits::MAX_COMPOUND_PARTS)));
+  const auto connectorSlots = static_cast<GLsizei>(std::clamp(
+      values.connectorCount, 0,
+      static_cast<int>(Limits::MAX_COMPOUND_CONNECTORS)));
   const auto partRects = flatten(values.partRects);
   const auto partRadii = flatten(values.partRadii);
   const auto partJunctions = flatten(values.partJunctions);
   const auto partMaterialExtents = flatten(values.partMaterialExtents);
   glUniform1i(locations.partCount, values.partCount);
-  glUniform4fv(locations.partRects,
-               static_cast<GLsizei>(Limits::MAX_COMPOUND_PARTS),
-               partRects.data());
-  glUniform4fv(locations.partRadii,
-               static_cast<GLsizei>(Limits::MAX_COMPOUND_PARTS),
-               partRadii.data());
-  glUniform4fv(locations.partJunctions,
-               static_cast<GLsizei>(Limits::MAX_COMPOUND_PARTS),
-               partJunctions.data());
-  glUniform4fv(locations.partMaterialExtents,
-               static_cast<GLsizei>(Limits::MAX_COMPOUND_PARTS),
-               partMaterialExtents.data());
-  glUniform1fv(locations.partOpacity,
-               static_cast<GLsizei>(Limits::MAX_COMPOUND_PARTS),
-               values.partOpacity.data());
+  if (partSlots > 0) {
+    glUniform4fv(locations.partRects, partSlots, partRects.data());
+    glUniform4fv(locations.partRadii, partSlots, partRadii.data());
+    glUniform4fv(locations.partJunctions, partSlots, partJunctions.data());
+    glUniform4fv(locations.partMaterialExtents, partSlots,
+                 partMaterialExtents.data());
+    glUniform1fv(locations.partOpacity, partSlots,
+                 values.partOpacity.data());
+  }
 
   const auto connectorRects = flatten(values.connectorRects);
   glUniform1i(locations.connectorCount, values.connectorCount);
-  glUniform4fv(locations.connectorRects,
-               static_cast<GLsizei>(Limits::MAX_COMPOUND_CONNECTORS),
-               connectorRects.data());
+  if (connectorSlots > 0)
+    glUniform4fv(locations.connectorRects, connectorSlots,
+                 connectorRects.data());
   glUniform1f(locations.connectorCurve, values.connectorCurve);
 
   glUniform1f(locations.refractionPixels, values.refractionPixels);

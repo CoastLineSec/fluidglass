@@ -192,6 +192,10 @@ Result<void> HyprlandGlassSceneController::refreshResolvedScene(
 
     auto nextMembership = membershipOf(presentations.value());
     const auto membershipChanged = m_membership != nextMembership;
+    // A retired output's frame bookkeeping would otherwise outlive it: the
+    // scheduler keys per-output state by name, and nothing else removes it.
+    for (const auto& retired : outputs.value().retired)
+        m_passes.forgetOutput(retired.snapshot.name);
     m_currentOutputs = std::move(outputs.value().current);
     m_targets = std::move(targets.value());
     m_presentations = std::move(presentations.value());
